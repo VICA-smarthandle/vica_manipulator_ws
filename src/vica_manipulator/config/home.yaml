@@ -1,0 +1,21 @@
+go_home:
+  ros__parameters:
+    joint_names:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+
+    step_names: [home]  # Names of the steps
+
+    # 2026-10-16 AMR 부착용 납작 접기(위팔 뒤로 수평, 아래팔 위에 겹쳐 수평, 손목 64도).
+    # 이전 [0.0, -2.07, 1.55, 1.10] → [0.0, -1.565, 1.562, 1.118](10-16).
+    # 2026-10-18 joint2·3 을 닿는 자리보다 약 1도 앞으로(13번 과부하). SRDF home 과 같은 값을 유지할 것(이유는 SRDF 주석).
+    # 2026-11-09 재조립 뒤 밑동이 틀어져 지지대에 얹힌 자리가 joint1 -1.2~-1.4도 → 홈 joint1 0 → -0.023(-1.3도).
+    # 2026-11-09 손목을 손으로 위로 들어 놓은 실측 0.724(41.5도) — 막대가 위를 보게(사용자 요청). 이전 1.118(64도).
+    home: [-0.023, -1.535, 1.540, 0.724]
+
+    duration: 3.0
+    epsilon: 0.01
+    action_topic: '/arm_controller/follow_joint_trajectory'
+    joint_states_topic: '/joint_states'

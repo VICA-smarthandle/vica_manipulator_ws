@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  팔 보드(나노)의 ROS 2 통신을 보드 간 랜선(10.77.0.2)과 나노 안(127.0.0.1, 공유 메모리)으로만 한다.
+  run/common.sh 가 이 기계에 10.77.0.2 가 있을 때만 FASTRTPS_DEFAULT_PROFILES_FILE 로 건다.
+
+  왜 - 엘리베이터 안은 와이파이가 끊기기 쉽다. 와이파이·랜선을 둘 다 쓰면 끊길 때 연결이 흔들린다.
+        또 같은 와이파이의 다른 컴퓨터가 도메인 77 로 팔을 부를 수 없게 된다.
+  NX 는 바꾸지 않는다. NX 는 모든 인터페이스로 말하므로 랜선(10.77.0.1)으로 나노를 찾는다.
+  2026-10-18
+-->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>wired_udp</transport_id>
+      <type>UDPv4</type>
+      <interfaceWhiteList>
+        <address>10.77.0.2</address>
+        <address>127.0.0.1</address>
+      </interfaceWhiteList>
+    </transport_descriptor>
+    <transport_descriptor>
+      <transport_id>local_shm</transport_id>
+      <type>SHM</type>
+    </transport_descriptor>
+  </transport_descriptors>
+
+  <participant profile_name="vica_arm_wired_only" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>local_shm</transport_id>
+        <transport_id>wired_udp</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>

@@ -1,0 +1,39 @@
+# ROS2 build outputs
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Editor / OS
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 날짜별 수동 백업(예: press.py.bak-20261022m). 이력은 git이 관리한다.
+*.bak
+*.bak-*
+*.old
+*.tmp
+
+# 런타임 생성 파일
+src/vica_manipulator/tools/latest.json
+*.db3
+*.mcap
+
+# Secrets
+.env
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+
+# 외부 ROS2 의존성은 vica.repos로 관리 (vcs import src < vica.repos)
+src/ros2_astra_camera/
+src/dynamixel_hardware_interface/

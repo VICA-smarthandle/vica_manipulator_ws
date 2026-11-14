@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--This does not replace URDF, and is not an extension of URDF.
+    This is a format for representing semantic information about the robot structure.
+    A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
+-->
+<robot name="vica_manipulator">
+    <!--GROUPS: Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
+    <!--LINKS: When a link is specified, the parent joint of that link (if it exists) is automatically included-->
+    <!--JOINTS: When a joint is specified, the child link of that joint (which will always exist) is automatically included-->
+    <!--CHAINS: When a chain is specified, all the links along the chain (including endpoints) are included in the group. Additionally, all the joints that are parents to included links are also included. This means that joints along the chain and the parent joint of the base link are included in the group-->
+    <!--SUBGROUPS: Groups can also be formed by referencing to already defined group names-->
+    <group name="arm">
+        <joint name="joint1"/>
+        <joint name="joint2"/>
+        <joint name="joint3"/>
+        <joint name="joint4"/>
+        <joint name="end_effector_joint"/>
+    </group>
+    <!--GROUP STATES: Purpose: Define a named state for a particular group, in terms of joint values. This is useful to define states like 'folded arms'-->
+    <group_state name="init" group="arm">
+        <joint name="joint1" value="-0.023"/>
+        <joint name="joint2" value="0"/>
+        <joint name="joint3" value="0"/>
+        <joint name="joint4" value="0"/>
+    </group_state>
+    <group_state name="home" group="arm">
+          <!-- VICA 2026-10-16 — AMR 부착용 납작 접기. 위팔은 뒤로 수평(12·13 축 같은 높이),
+               아래팔은 그 위에 수평으로 겹친다. 짐칸과 부딪히지 않고 범퍼 밖 돌출이 11.5 → 7.5 cm 로 준다.
+               joint2·3 은 손으로 놓은 실측(-1.565, 1.562). 손목은 실측 1.378(79도)에서 막대가
+               link3·link2 와 최대 4 mm 겹쳐 MoveIt 이 출발 자세를 충돌로 보므로, 처음 통과하는 1.118(64도)로 둔다.
+               2026-10-18 — joint2·3 을 닿는 자리보다 약 1도 앞(-1.535, 1.540)으로 옮겼다. 힘을 빼면 팔꿈치는
+               89.4도(아래팔이 위팔에 얹힘), 어깨는 -88.8도(받침대)에서 멈추는데 옛 목표(89.5도, -89.7도)는 그보다
+               안쪽이라 I 게인이 계속 밀어 넣다가 13번이 과부하 경보를 냈다(10-18 3번 켜서 2번).
+               2026-11-09 — 재조립 뒤 밑동이 틀어져, 힘 빼고 지지대에 얹으면 joint1 이 -1.2~-1.4도(-0.021, -0.025)다.
+               0 으로 두면 팔이 지지대 옆으로 비껴 눕으므로 joint1 을 -0.023(-1.3도)으로 둔다.
+               같은 날 손목은 막대가 위를 보도록 손으로 들어 놓은 실측 0.724(41.5도)로 올렸다(이전 1.118, 64도). -->
+          <joint name="joint1" value="-0.023"/>
+          <joint name="joint2" value="-1.535"/>
+          <joint name="joint3" value="1.540"/>
+          <joint name="joint4" value="0.724"/>
+      </group_state>
+    <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
+    <end_effector name="end_effector" parent_link="end_effector_link" group="arm"/>
+    <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <disable_collisions link1="link1" link2="link2" reason="Adjacent"/>
+    <disable_collisions link1="link1" link2="link3" reason="Never"/>
+    <disable_collisions link1="link2" link2="link3" reason="Adjacent"/>
+    <disable_collisions link1="link3" link2="link4" reason="Adjacent"/>
+    <disable_collisions link1="link4" link2="link5" reason="Adjacent"/>
+    <disable_collisions link1="pillar_link" link2="link1" reason="Adjacent"/>
+    <disable_collisions link1="pillar_link" link2="link2" reason="Default"/>
+ <!-- VICA - 완전히 접힌 자세에서만 닿는 쌍. 실물이 이 자세로 쉬므로 허용 2026-10-05 -->
+    <disable_collisions link1="link2" link2="link4" reason="User"/>
+    <disable_collisions link1="link2" link2="link5" reason="User"/>
+    <disable_collisions link1="link3" link2="link5" reason="User"/>
+    <!-- VICA 2026-10-15 — FR12_H104 누름 도구 -->
+    <disable_collisions link1="tool_link" link2="link5" reason="Adjacent"/>
+    <disable_collisions link1="tool_link" link2="link4" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="link5" reason="Adjacent"/>
+    <disable_collisions link1="camera_link" link2="tool_link" reason="Adjacent"/>
+    <disable_collisions link1="camera_link" link2="link4" reason="Never"/>
+</robot>

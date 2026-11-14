@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<!-- VICA 엘리베이터 버튼 팔. ROBOTIS OpenMANIPULATOR-X 를 바탕으로
+     장링크(상완 355, 전완 375), FR12_H104 누름 막대, 손목 Astra Mini S 를 실측 반영했다.
+     원점 world 는 받침 기둥 바닥 중심이다. AMR 위 위치는 이 파일에 넣지 않는다
+     (팔 보드와 주행 보드는 URDF 를 합치지 않는다). -->
+<robot name="vica_manipulator" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:arg name="use_mock_hardware" default="false" />
+  <xacro:arg name="mock_sensor_commands" default="false" />
+  <xacro:arg name="port_name" default="/dev/ttyACM0" />
+
+  <xacro:include filename="$(find vica_manipulator)/urdf/arm.xacro" />
+  <xacro:include filename="$(find vica_manipulator)/urdf/ros2_control.xacro" />
+
+  <link name="world"/>
+
+  <!-- 받침 기둥 165.3 mm (2026-10-02 실측). 앞뒤 35 x 좌우 55 mm. -->
+  <xacro:property name="pillar_h" value="0.1653"/>
+  <xacro:property name="pillar_x" value="0.035"/>
+  <xacro:property name="pillar_y" value="0.055"/>
+
+  <link name="pillar_link">
+    <visual>
+      <origin xyz="0 0 ${pillar_h/2}" rpy="0 0 0"/>
+      <geometry><box size="${pillar_x} ${pillar_y} ${pillar_h}"/></geometry>
+      <material name="vica_print"><color rgba="0.93 0.93 0.93 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${pillar_h/2}" rpy="0 0 0"/>
+      <geometry><box size="${pillar_x} ${pillar_y} ${pillar_h}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 ${pillar_h/2}"/>
+      <mass value="0.3"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-4"/>
+    </inertial>
+  </link>
+
+  <joint name="world_fixed" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="world"/>
+    <child link="pillar_link"/>
+  </joint>
+
+  <joint name="pillar_to_base" type="fixed">
+    <origin xyz="0 0 ${pillar_h}" rpy="0 0 0"/>
+    <parent link="pillar_link"/>
+    <child link="link1"/>
+  </joint>
+
+  <xacro:vica_arm prefix="" />
+
+  <xacro:vica_arm_system
+    name="VicaArmSystem" prefix=""
+    use_mock_hardware="$(arg use_mock_hardware)"
+    mock_sensor_commands="$(arg mock_sensor_commands)"
+    port_name="$(arg port_name)"/>
+</robot>

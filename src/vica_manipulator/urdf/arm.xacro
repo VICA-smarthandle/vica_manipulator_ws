@@ -1,0 +1,380 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="vica_arm" params="prefix=''">
+
+    <xacro:property
+      name="meshes_file_direction"
+      value="package://vica_manipulator/meshes"/>
+    
+    <!-- 2026-10-02 VICA - 3D 프린트 장링크. 축↔축 실측
+           상완 130.2 → 355 mm (앞으로 24 mm, 꺾임각 3.88°)
+           전완 124   → 375 mm (꺾임 없음)
+           흰 각재 307 mm, 단면 21.5(앞뒤·x) × 32.1(좌우·y) -->
+      <xacro:property name="upper_arm_offset_x" value="0.024"/>
+      <xacro:property name="upper_arm_dz"       value="0.35419"/>
+      <xacro:property name="forearm_len"        value="0.375"/>
+      <xacro:property name="strut_t"            value="0.0215"/>
+      <xacro:property name="strut_w"            value="0.0321"/>  
+    
+
+    <link name="${prefix}link1">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link1.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey">
+          <color rgba="0.2 0.2 0.2 1"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link1.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+       <inertial>
+        <origin xyz="3.0876154e-04 0.0000000e+00 -1.2176461e-04" />
+        <mass value="7.9119962e-02" />
+        <inertia ixx="1.2505234e-05" ixy="0.0" ixz="-1.7855208e-07"
+                 iyy="2.1898364e-05" iyz="0.0"
+                 izz="1.9267361e-05" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint1" type="revolute">
+      <parent link="${prefix}link1"/>
+      <child link="${prefix}link2"/>
+      <origin xyz="0.012 0.0 0.0" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit velocity="4.8" effort="1000" lower="${-pi}" upper="${pi}" />
+      <dynamics damping="0.1"/>
+    </joint>
+
+    <link name="${prefix}link2">
+      <visual>
+        <origin xyz="0 0 0.019" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link2.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="grey">
+          <color rgba="0.2 0.2 0.2 1"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0.019" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/link2.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+
+       <inertial>
+        <origin xyz="-3.0184870e-04 5.4043684e-04 ${0.018 + 2.9433464e-02}" />
+        <mass value="9.8406837e-02" />
+        <inertia ixx="3.4543422e-05" ixy="-1.6031095e-08" ixz="-3.8375155e-07"
+                 iyy="3.2689329e-05" iyz="2.8511935e-08"
+                 izz="1.8850320e-05" />
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint2" type="revolute">
+      <parent link="${prefix}link2"/>
+      <child link="${prefix}link3"/>
+      <origin xyz="0.0 0.0 0.0595" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1000" lower="${-2.15}" upper="${1.5}" />
+      <dynamics damping="0.1"/>
+    </joint>
+
+    <link name="${prefix}link3">
+     <!-- 어깨 브라켓 (순정) -->
+        <visual>
+          <origin xyz="0 0 -0.002" rpy="0 0 0"/>
+          <geometry><box size="0.040 0.052 0.028"/></geometry>
+          <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
+        </visual>
+        <!-- 흰 각재 (세로) -->
+        <visual>
+          <origin xyz="0 0 0.1731" rpy="0 0 0"/>
+          <geometry><box size="${strut_t} ${strut_w} 0.3222"/></geometry>
+          <material name="vica_print"><color rgba="0.93 0.93 0.93 1.0"/></material>
+        </visual>
+        <!-- 엘보 브라켓 (순정) — 24mm 꺾임을 만드는 부품 -->
+        <visual>
+          <origin xyz="0.018 0 0.3559" rpy="0 0 0"/>
+          <geometry><box size="0.060 0.052 0.046"/></geometry>
+          <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
+        </visual>
+
+        <collision>
+          <origin xyz="0 0 -0.004" rpy="0 0 0"/>
+          <geometry><box size="0.040 0.052 0.032"/></geometry>
+        </collision>
+        <collision>
+          <origin xyz="0 0 0.1731" rpy="0 0 0"/>
+          <geometry><box size="${strut_t} ${strut_w} 0.3222"/></geometry>
+        </collision>
+        <collision>
+          <origin xyz="0.018 0 0.3559" rpy="0 0 0"/>
+          <geometry><box size="0.060 0.052 0.046"/></geometry>
+        </collision>
+
+        <inertial>
+          <origin xyz="0.012 0 0.177" />
+          <mass value="0.22" />
+          <inertia ixx="2.2e-03" ixy="0.0" ixz="0.0"
+                   iyy="2.2e-03" iyz="0.0"
+                   izz="4.5e-05" />
+        </inertial>
+      </link>
+
+
+    <joint name="${prefix}joint3" type="revolute">
+      <parent link="${prefix}link3"/>
+      <child link="${prefix}link4"/>
+      <origin xyz="${upper_arm_offset_x} 0 ${upper_arm_dz}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1000" lower="${-1.5}" upper="${1.57}" />
+      <dynamics damping="0.1"/>
+    </joint>
+
+    <link name="${prefix}link4">
+     <!-- 엘보측 브라켓 (순정) -->
+        <visual>
+          <origin xyz="0.004 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.048 0.053 0.040"/></geometry>
+          <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
+        </visual>
+        <!-- 흰 각재 (가로) -->
+        <visual>
+          <origin xyz="0.182 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.308 ${strut_w} ${strut_t}"/></geometry>
+          <material name="vica_print"><color rgba="0.93 0.93 0.93 1.0"/></material>
+        </visual>
+        <!-- 손목 브라켓 (순정) -->
+        <visual>
+          <origin xyz="0.367 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.062 0.040 0.048"/></geometry>
+          <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
+        </visual>
+
+        <collision>
+          <origin xyz="0.004 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.048 0.053 0.040"/></geometry>
+        </collision>
+        <collision>
+          <origin xyz="0.182 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.308 ${strut_w} ${strut_t}"/></geometry>
+        </collision>
+        <collision>
+          <origin xyz="0.367 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.062 0.040 0.048"/></geometry>
+        </collision>
+
+        <inertial>
+          <origin xyz="0.188 0 0" />
+          <mass value="0.21" />
+          <inertia ixx="4.0e-05" ixy="0.0" ixz="0.0"
+                   iyy="2.5e-03" iyz="0.0"
+                   izz="2.5e-03" />
+        </inertial>
+      </link>  
+
+    <joint name="${prefix}joint4" type="revolute">
+      <parent link="${prefix}link4"/>
+      <child link="${prefix}link5"/>
+      <origin xyz="${forearm_len} 0.0 0.0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit velocity="4.8" effort="1000" lower="${-1.7}" upper="${1.97}" />
+      <dynamics damping="0.1"/>
+    </joint>
+
+    <!-- VICA 2026-10-15 — link5.stl 은 좌우 128.6 mm 로 그리퍼 집게까지 들어 있어
+         실물(그리퍼 제거)과 다르다. 손목 서보 + 마운트만 박스로 대체한다.
+         마운트 실측 앞뒤 28 x 가로 41 x 세로 46 mm (2026-10-15). 모터축 0 에서 막대 시작 28 까지를 채운다. -->
+    <link name="${prefix}link5">
+      <visual>
+        <origin xyz="0.014 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.028 0.041 0.046"/>
+        </geometry>
+        <material name="grey">
+          <color rgba="0.2 0.2 0.2 1"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0.014 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.028 0.041 0.046"/>
+        </geometry>
+      </collision>
+
+       <inertial>
+        <origin xyz="4.4206755e-02 3.6839985e-07 8.9142216e-03" />
+        <mass value="1.4327573e-01" />
+        <inertia ixx="8.0870749e-05" ixy="0.0" ixz="-1.0157896e-06"
+                 iyy="7.5980465e-05" iyz="0.0"
+                 izz="9.3127351e-05" />
+      </inertial>
+    </link>
+
+    <!-- VICA 2026-10-15 — 순정 그리퍼 제거, FR12_H104 누름 도구 장착.
+         실측 — ID14 축에서 도구 시작 28 mm, 축에서 TCP 156 mm.
+         길이 128 mm (줄자 126 + 오차 2, 마운트와 맞닿게). visual 은 CAD 메시(테이퍼 그대로), collision 은 박스 4 단(38/35/32/22). -->
+    <joint name="${prefix}tool_joint" type="fixed">
+      <parent link="${prefix}link5"/>
+      <child link="${prefix}tool_link"/>
+      <origin xyz="0.092 0 0.00135" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}tool_link">
+      <!-- visual 은 실제 CAD 메시. 끝으로 갈수록 좁아지는 테이퍼가 그대로 나온다.
+           STL 은 길이축이 Y 라서 Z 축으로 -90 도 돌려 X(앞) 와 맞춘다.
+           STL 원점 = 모터축이므로 tool_joint 를 0 으로 두고 그대로 얹는다. -->
+      <visual>
+        <origin xyz="-0.092 0 -0.00035" rpy="0 0 ${-pi/2}"/>
+        <geometry>
+          <mesh filename="${meshes_file_direction}/fr12_h104_tool.stl" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="tool_white">
+          <color rgba="0.92 0.92 0.92 1"/>
+        </material>
+      </visual>
+
+      <!-- collision 은 4 단 박스. STL 구간별 최대폭 + 1 mm 여유로 잡았다.
+           메시로 하면 삼각형 892 개를 매번 검사해 느리다. 박스는 빠르고 보수적이다.
+           구간별 실측폭 — 28~68:37.0 / 68~108:33.8 / 108~148:30.7 / 148~156:20.9 -->
+      <collision>
+        <origin xyz="-0.044 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.040 0.038 0.024"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="-0.004 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.040 0.035 0.024"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0.036 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.040 0.032 0.024"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0.060 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.008 0.022 0.018"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" />
+        <mass value="0.04" />
+        <inertia ixx="6.4e-06" ixy="0.0" ixz="0.0"
+                 iyy="5.6e-05" iyz="0.0"
+                 izz="5.9e-05" />
+      </inertial>
+    </link>
+
+
+    <!-- VICA 2026-10-15 — Astra Mini S 를 누름 도구 윗면에 장착. 박스는 3D 프린트 하우징 실측 가로(좌우) 90 x 앞뒤 38 x 높이 24 mm (센서 모듈 자체는 84.9 x 20 x 19.61).
+         위치 실측 2026-10-15 — 막대 윗면에서 렌즈 중심 17 mm, 마운트 앞면에서 카메라 앞면 29 mm.
+         optical frame 은 REP-103 (z 가 보는 방향, x 오른쪽, y 아래).
+         VICA 2026-10-18 — 카메라는 선 꽂는 곳이 위로 오게 일부러 거꾸로(앞 방향 축으로 180도) 달았다.
+         영상이 위아래로 뒤집혀 보인다(나노 rqt 로 사용자 확인). 막대와는 나란하다(기울기 0).
+         검산(2026-10-18, 관절 읽기 → 영상 → 관절 읽기로 같은 순간을 보장) — q 0.8, -119.2, 89.1, 74.4 도에서
+         바닥 평면(RANSAC 13만 점)으로 잰 카메라 높이 0.670 m(모델 0.667), 숙임 41.7 도(모델 44.3).
+         막대 끝 예측 화면 위치(336, 87)가 영상의 막대 끝과 겹친다. 수평계로 잰 막대는 41 도(모델 44.3).
+         남은 약 3 도(깊이 -2.6, 수평계 -3.3)는 손목 영점이나 마운트로 보이며, 손목 각도 2~3 개로 다시 재서
+         같게 나오면 보정한다. 앞서 기록한 24 도는 영상과 관절을 다른 순간에 읽어 생긴 착오였다.
+         YOLO 는 바로 선 사진으로 학습했으므로 넣기 전에 영상을 180 도 돌려야 한다(안 돌리면 up/down 화살표가 뒤바뀐다). -->
+    <xacro:property name="cam_tilt_down" value="0.0"/>
+    <joint name="${prefix}camera_joint" type="fixed">
+      <parent link="${prefix}link5"/>
+      <child link="${prefix}camera_link"/>
+      <origin xyz="0.047 0 0.033" rpy="${pi} ${cam_tilt_down} 0"/>
+    </joint>
+
+    <link name="${prefix}camera_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.038 0.090 0.024"/>
+        </geometry>
+        <material name="vica_print">
+          <color rgba="0.93 0.93 0.93 1.0"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.038 0.090 0.024"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" />
+        <mass value="0.03" />
+        <inertia ixx="1.7e-05" ixy="0.0" ixz="0.0"
+                 iyy="2.0e-06" iyz="0.0"
+                 izz="1.7e-05" />
+      </inertial>
+    </link>
+
+    <!-- 깊이의 기준은 IR 카메라다. 하우징 중심에서 오른쪽(-y) 28 mm. 하우징 끝 기준 실측이라 가정이 없다.
+         마주본 상태 — 왼쪽끝~RGB 42, 오른쪽끝~RGB 48 (합 90 = 하우징 폭, 검산 통과).
+         RGB~IR 25 이므로 왼쪽끝~IR 17, 중심 45 에서 28. 마주본 왼쪽 = 로봇 오른쪽.
+         데이터시트(Astra Mini)는 LDM~RGB 55 로 다르다 — 실물 Mini S 는 29 다.
+         최종값은 알려진 점을 깊이로 재서 역산하는 캘리브레이션으로 잡는다.
+         2026-10-18 — camera_link 가 180 도 돌아 있어 그 좌표의 y 가 로봇 오른쪽을 향한다. 그래서 부호가 + 다.
+         실물 위치(로봇 오른쪽 28 mm)는 그대로다. -->
+    <joint name="${prefix}camera_optical_joint" type="fixed">
+      <parent link="${prefix}camera_link"/>
+      <child link="${prefix}camera_depth_optical_frame"/>
+      <origin xyz="0 0.028 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    </joint>
+
+    <link name="${prefix}camera_depth_optical_frame"/>
+
+    <!-- 색(RGB) 카메라. 하우징 중심에서 오른쪽(-y) 3 mm — 마주본 상태 왼쪽끝~RGB 42, 중심 45.
+         드라이버를 depth_registration 으로 띄우면 깊이 영상도 이 프레임으로 나온다(2026-10-15 실측,
+         상자 테두리 어긋남 2~3 px). 드라이버는 publish_tf false 로 띄워 이 값을 덮지 않게 한다.
+         2026-10-18 — camera_link 가 180 도 돌아 있어 부호가 + 다(실물은 그대로 로봇 오른쪽 3 mm). -->
+    <joint name="${prefix}camera_color_optical_joint" type="fixed">
+      <parent link="${prefix}camera_link"/>
+      <child link="${prefix}camera_color_optical_frame"/>
+      <origin xyz="0 0.003 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    </joint>
+
+    <link name="${prefix}camera_color_optical_frame"/>
+
+    <joint name="${prefix}end_effector_joint" type="fixed">
+      <parent link="${prefix}link5"/>
+      <child link="${prefix}end_effector_link"/>
+      <origin xyz="0.156 0.0 0.0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}end_effector_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.01 0.01 0.01" />
+        </geometry>
+        <material name="red">
+          <color rgba="1.0 0.0 0.0 1"/>
+        </material>
+      </visual>
+    </link>
+
+  </xacro:macro>
+
+</robot>
