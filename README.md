@@ -17,8 +17,12 @@ VICA 매니퓰레이터(엘리베이터 버튼 누르기 팔) ROS 2 워크스페
 ```bash
 git clone git@github.com:VICA-smarthandle/vica_manipulator_ws.git ~/vica_manipulator_ws
 cd ~/vica_manipulator_ws
-vcs import src < vica.repos
-# 시스템 의존성/빌드는 src/vica_manipulator/deploy/ 참고
-src/vica_manipulator/deploy/install_system.sh
-src/vica_manipulator/deploy/build.sh
+vcs import src < vica.repos                      # 외부 의존성 받기 (python3-vcstool)
+bash src/vica_manipulator/deploy/install_system.sh   # 시스템 패키지/udev (최초 1회, sudo)
+
+source /opt/ros/humble/setup.bash
+MAKEFLAGS=-j2 colcon build --symlink-install --parallel-workers 2
+bash src/vica_manipulator/run/check.sh           # 점검
 ```
+
+> `deploy/build.sh`는 tarball 배포 키트(`~/vica_arm_kit`)용 스크립트입니다. git으로 받았다면 위 명령을 쓰세요.
