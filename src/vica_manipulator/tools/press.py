@@ -22,7 +22,9 @@
 단계마다 걸린 시간을 '시간:' 줄에 찍는다.
 
 경로·궤적은 MoveIt 이 만든다. 기본은 Pilz PTP(관절을 곧게 보간 + 충돌 검사),
-안 되면 OMPL 로 다시 시도한다.
+안 되면 OMPL 로 다시 시도한다. 단 누르기(접근점 → 누름점 → 더 누르기)는 11-16 부터 손끝 곧은 선(2 mm 간격 IK,
+line_traj)이다. 찌르는 방향은 config push_yaw_deg(벽 법선, 호출 버튼 0 = AMR 정면 벽에 수직), 없으면 방사 방향.
+누름점까지 안 닿으면 같은 선으로 seek 만큼 더 밀며 닿음을 찾는다. 단계별 손끝·화살표 자리는 meta.json "push".
 """
 import argparse, json, math, os, shutil, signal, sys, threading, time
 
@@ -377,6 +379,40 @@ def forward_push(q, dist):
     return [q[0]] + [q[k + 1] + float(dq[k]) for k in range(3)]
 
 
+# 곧은 선 궤적의 속도 기준 = config/joint_limits.yaml 관절 최대(속도 4.8 rad/s·가속 5.0 rad/s²). 배율(speed.press 등)을
+# 곱해 쓴다 — MoveIt PTP 와 같은 배율이면 걸리는 시간도 거의 같다(10-22 누르기 6.5 cm, PTP 1.9 s)
+LINE_VMAX, LINE_AMAX = 4.8, 5.0
+
+
+def line_traj(cur, end_xyz, vel):
+    """지금 관절 cur 의 손끝에서 end_xyz 까지 곧은 선으로 가는 궤적. 막대 숙임(pitch)은 지금 그대로.
+
+    11-16: 누르기를 MoveIt PTP(관절 보간)에서 이 선으로 바꿨다. PTP 도 방사 방향이면 직선에서 2 mm 안이지만,
+    벽 법선으로 찌르려면(push_yaw) 손끝을 정한 선 위로 옮겨야 한다. 2 mm 간격 IK 점 → path_traj(사다리꼴 속도).
+    (궤적, 초, 경유점) 또는 (None, 이유, None).
+    """
+    start, pitch = geom.fk(cur)
+    pts, why = geom.line_joints(start, end_xyz, pitch)
+    if pts is None:
+        return None, why, None
+    traj, sec = path_traj(cur, pts, vel * LINE_VMAX, vel * LINE_AMAX)
+    return traj, sec, pts
+
+
+def push_frame(button, yaw):
+    """찌르는 방향 단위 벡터 u 와, 그 방향에 직각인 '오른쪽'(world 수평) r. 기록·출력용."""
+    ux, uy = geom.push_dir(button, yaw)
+    return (ux, uy, 0.0), (uy, -ux, 0.0)
+
+
+def tip_vs_button(q, button, yaw):
+    """관절 q 의 손끝이 버튼 면(찌르는 선의 버튼 점) 기준 어디인지 m: (앞으로 + = 면 너머, 오른쪽, 위)."""
+    (x, y, z), _ = geom.fk(q)
+    u, r = push_frame(button, yaw)
+    d = (x - button[0], y - button[1], z - button[2])
+    return (sum(a * b for a, b in zip(d, u)), sum(a * b for a, b in zip(d, r)), d[2])
+
+
 def find_marker(raw, aim):
     """접근점 화면(원본 방향 BGR)에서 버튼 표시(빨간 화살표) 덩어리 가운데를 바로 선 화면 (u, v) 로. 못 찾으면 None.
 
@@ -422,7 +458,7 @@ def aim_at_center(n, args, aim, button, timing):
     """
     t0, d, log, fail, prev = time.time(), args.standoff + CAM_FWD, [], None, None
     need = bool(aim.get("require", True))
-    approach, press = geom.approach_and_press(button, args.standoff, args.depth)
+    approach, press = geom.approach_and_press(button, args.standoff, args.depth, args.push_yaw)
     j_app, _ = geom.press_ik(*approach)
     j_prs, _ = geom.press_ik(*press)
     for i in range(int(aim.get("tries", 2)) + 1):
@@ -471,7 +507,7 @@ def aim_at_center(n, args, aim, button, timing):
             break
         a = math.atan2(button[1], button[0] - geom.J1_X)       # 밑동 → 버튼(찌르는 방향)
         nb = (button[0] + right_m * math.sin(a), button[1] - right_m * math.cos(a), button[2] + up_m)
-        ap2, pr2 = geom.approach_and_press(nb, args.standoff, args.depth)
+        ap2, pr2 = geom.approach_and_press(nb, args.standoff, args.depth, args.push_yaw)
         ja2, why = geom.press_ik(*ap2)
         jp2, why2 = geom.press_ik(*pr2)
         if ja2 is None or jp2 is None:
@@ -1062,9 +1098,10 @@ class Presser(Node):
             t = self.plan(target, vel, "ompl", "RRTConnectkConfigDefault")
         return t
 
-    def execute(self, traj, **kw):
+    def execute(self, traj, replan=None, **kw):
         """궤적 실행. 길목 신호등이 빨간불이면 멈추고(출발 전이면 출발하지 않고) 손이 빠지길 기다린 뒤,
         지금 자세에서 같은 끝 자세로 다시 계획해 이어간다. 빨간불이 wait_sec 넘게 안 꺼지면 HAND.
+        replan(지금 관절 → 궤적 또는 None)을 주면 다시 계획할 때 MoveIt PTP 대신 그것을 쓴다(곧은 선 누르기).
         나머지 결과는 _execute_once 와 같다."""
         names = list(traj.joint_trajectory.joint_names)
         last = traj.joint_trajectory.points[-1].positions if traj.joint_trajectory.points else None
@@ -1077,14 +1114,15 @@ class Presser(Node):
             if stopped:                                  # 가다 멈췄다 → 처음 궤적은 출발점이 달라 못 쓴다
                 # 멈추며 생긴 흔들림이 가라앉은 자세에서(11-02 실물: 1 s 로는 모자라 '출발점이 0.01 넘게 다름' 거부)
                 self.settle()
-                traj = self.plan_any(target, vel) if target else None
+                kw.pop("shots_at", None)                 # 찍을 시각은 처음 궤적 기준이라 이어가기에선 안 맞는다
+                traj = (replan(self.cur) if replan else self.plan_any(target, vel)) if target else None
                 if traj is None:
                     return False
             ok = self._execute_once(traj, **kw)
             if ok is False and stopped and target:
                 print("  다시 이어가기 실행 거부 — 자리 잡고 한 번 더 계획")
                 self.settle()
-                traj = self.plan_any(target, vel)
+                traj = replan(self.cur) if replan else self.plan_any(target, vel)
                 ok = False if traj is None else self._execute_once(traj, **kw)
             touched = touched or self.touched
             if ok != HAND:
@@ -1097,8 +1135,11 @@ class Presser(Node):
         """마지막 wait_clear 가 시간을 넘겼다(빨간불이 안 꺼짐) — 그 뒤 홈 길(move_to)은 손 감시를 끈다."""
         return getattr(self, "_hand_stuck", False)
 
-    def _execute_once(self, traj, base=None, stop_ma=CRASH_MA, n_over=CRASH_N, why="충돌", touch_ma=None, light=None):
+    def _execute_once(self, traj, base=None, stop_ma=CRASH_MA, n_over=CRASH_N, why="충돌", touch_ma=None, light=None,
+                      shots_at=None):
         """궤적 실행 + 전류(·불빛·길목 신호등) 감시. True = 끝까지 감, False = 실패, 문자열 = 그 이유로 멈춤.
+
+        shots_at = [(실행 시작부터 초, 사진 이름), …] 이면 그 시각에 손목 카메라 사진을 담는다(누르기 1 cm 앞 등).
 
         base(관절별 mA)가 있으면 base 대비 오름을, 없으면 전류 자체를 WATCH 관절마다 본다.
         stop_ma 를 n_over 장(100 Hz) 이어 넘으면 멈춘다(why). touch_ma 를 CONTACT_N 장 넘으면 멈추지 않고
@@ -1128,6 +1169,8 @@ class Presser(Node):
         t0 = time.time()
         while not fut.done() and time.time() - t0 < 60.0:
             rclpy.spin_once(self, timeout_sec=0.01)
+            while shots_at and time.time() - t0 >= shots_at[0][0]:
+                self.shot(shots_at.pop(0)[1])
             rows, seen = self.amp_hist[seen:], len(self.amp_hist)
             for r in rows:
                 rise = [r[i] - (base[i] if base else 0.0) for i in range(len(JOINTS))]
@@ -1269,6 +1312,12 @@ def main():
                     help="엘베 안: 누르고 불을 확인하면 접근점에서 그 불이 꺼질 때(= 그 층 도착)까지 지켜본 뒤 홈")
     ap.add_argument("--contact-ma", type=float, default=None,
                     help="누르기 중 접근점보다 이만큼 전류가 오르면 닿음으로 보고 멈춤 mA (기본 config/press.yaml)")
+    ap.add_argument("--push-yaw", type=float, default=None,
+                    help="찌르는 방향 = 벽 법선(world, 도). 0 = AMR 정면 벽에 수직 (기본 config/press.yaml push_yaw_deg)")
+    ap.add_argument("--radial", action="store_true",
+                    help="11-16 전 방식: 밑동에서 버튼 쪽(방사 방향)으로 찌름 — 버튼이 옆에 있으면 벽을 비스듬히 민다")
+    ap.add_argument("--seek", type=float, default=None,
+                    help="누름점까지 안 닿으면 같은 선으로 이만큼 더 밀며 닿음을 찾는다 m (기본 config/press.yaml seek)")
     args = ap.parse_args()
 
     group, prof, speed = load_profile(args.target)
@@ -1282,6 +1331,17 @@ def main():
         args.push = float(prof.get("push", 0.0))
     args.push_ma = float(prof.get("push_ma", 300))
     args.need_light = bool(prof.get("need_light", False))
+    if args.radial:
+        args.push_yaw = None
+    elif args.push_yaw is not None:
+        args.push_yaw = math.radians(args.push_yaw)
+    elif prof.get("push_yaw_deg") is not None:
+        args.push_yaw = math.radians(float(prof["push_yaw_deg"]))
+    if args.seek is None:
+        args.seek = float(prof.get("seek", 0.0))
+    print("[설정] 찌르는 방향: " + ("밑동에서 버튼 쪽(방사 방향)" if args.push_yaw is None else
+                               f"벽 법선 {math.degrees(args.push_yaw):+.0f}°(world) — 손끝이 벽에 수직으로 곧게 들어감")
+          + (f", 안 닿으면 {args.seek * 100:.1f} cm 더 밀며 찾음" if args.seek > 0 else ""))
     print(f"[설정] {group}({'승강장 호출' if group == 'hall' else '엘베 안'}): 높이 보정 +{args.z_up * 100:.1f} cm, "
           f"깊이 {args.depth * 100:+.1f} cm, 닿음 {args.contact_ma:.0f} mA, "
           f"빼기 {'없음(바로 홈)' if args.retract <= 0 else f'{args.retract * 100:.0f} cm'}, "
@@ -1412,7 +1472,7 @@ def body(n, args, group, prof, speed, T0):
                      "카메라로 한 번 누르기에 성공하면 저절로 저장됩니다")
         button = tuple(saved["button"])           # 성공했던 최종 목표(높이 보정까지 들어 있음)
         n.button_seen = {"saved": saved}
-        approach, press = geom.approach_and_press(button, args.standoff, args.depth)
+        approach, press = geom.approach_and_press(button, args.standoff, args.depth, args.push_yaw)
         print(f"[{args.target}] 저장한 버튼 자리({saved.get('time')}, {saved.get('result')})로 누릅니다")
     else:
         b = load_button(args.target, args.max_age)
@@ -1422,7 +1482,7 @@ def body(n, args, group, prof, speed, T0):
         if args.z_up:
             print(f"  높이 보정 +{args.z_up * 100:.1f} cm: 버튼 높이 {button[2]:.3f} → {button[2] + args.z_up:.3f} (world z)")
             button = (button[0], button[1], button[2] + args.z_up)
-        approach, press = geom.approach_and_press(button, args.standoff, args.depth)
+        approach, press = geom.approach_and_press(button, args.standoff, args.depth, args.push_yaw)
         src = {"button": "깊이", "size": "버튼 크기", "closer": "깊이·크기 중 가까운 쪽"}.get(b.get("z_src"), "?")
         print(f"[{args.target}] 신뢰도 {b['conf']}, 카메라 거리 {b['z_m'] * 100:.1f} cm ({src})")
     if group == "floor" and args.depth >= 0:
@@ -1559,6 +1619,14 @@ def run_steps(n, args, j_app, j_prs, press, timing, T0, button, prof):
     photo_dir = load_photo_dir()
     if args.dry:
         traj = plan_step(n, args, "접근점으로 (--dry: 계획만)", j_app, args.vel, "full")
+        u, _ = push_frame(button, args.push_yaw)
+        end = tuple(p + (args.seek if args.depth >= 0 else 0.0) * c for p, c in zip(press, u))
+        app_xyz, pitch = geom.fk(j_app)
+        pts, why = geom.line_joints(app_xyz, end, pitch)
+        print(f"  누르기 곧은 선 {math.dist(app_xyz, end) * 100:.1f} cm: "
+              + (f"풀림({len(pts)}점, 막대가 찌르는 방향과 "
+                 f"{math.degrees(math.remainder(pts[-1][0] - math.atan2(u[1], u[0]), 2 * math.pi)):+.1f}° 기욺)"
+                 if pts else f"못 풂 — {why}"))
         n.spin_for(3.0)
         print("팔은 움직이지 않았습니다.")
         return None if not isinstance(traj, str) else traj
@@ -1577,7 +1645,7 @@ def run_steps(n, args, j_app, j_prs, press, timing, T0, button, prof):
         timing["중간"] = time.time() - t
         n.guard_wall = button
         if mid_fail is None:
-            approach, press = geom.approach_and_press(button, args.standoff, args.depth)
+            approach, press = geom.approach_and_press(button, args.standoff, args.depth, args.push_yaw)
             j_app, why = geom.press_ik(*approach)
             j_prs, why2 = geom.press_ik(*press)
             if j_app is None or j_prs is None:
@@ -1589,12 +1657,12 @@ def run_steps(n, args, j_app, j_prs, press, timing, T0, button, prof):
         if mid_fail:
             return move("home 으로", HOME, args.home_vel, "quick", "홈") or mid_fail
 
-    # 손 명령으로 좌우 옮기기(--right, + = 로봇 오른쪽): 밑동 → 버튼 방향에 직각으로
+    # 손 명령으로 좌우 옮기기(--right, + = 로봇 오른쪽): 찌르는 방향에 직각으로(벽 법선이면 벽을 따라)
     if args.right:
-        a = math.atan2(button[1], button[0] - geom.J1_X)
-        button = (button[0] + args.right * math.sin(a), button[1] - args.right * math.cos(a), button[2])
+        _, (rx, ry, _) = push_frame(button, args.push_yaw)
+        button = (button[0] + args.right * rx, button[1] + args.right * ry, button[2])
         n.guard_wall = button
-        approach, press = geom.approach_and_press(button, args.standoff, args.depth)
+        approach, press = geom.approach_and_press(button, args.standoff, args.depth, args.push_yaw)
         j_app, why = geom.press_ik(*approach)
         j_prs, why2 = geom.press_ik(*press)
         if j_app is None or j_prs is None:
@@ -1647,42 +1715,89 @@ def run_steps(n, args, j_app, j_prs, press, timing, T0, button, prof):
         else:
             light = (red0, lit)
             print(f"  불빛: 막대 끝 칸 빨강 기준 {red0}점 — +{lit['min_px']} 넘게 {lit['frames']}장이면 불 켜짐")
-    traj = plan_step(n, args, "버튼 누르기", j_prs, args.press_vel, None)
-    if isinstance(traj, str):
-        return traj
-    # 1 단계: 누름점으로 밀다 닿으면(전류) 그 자리에서 멈춘다. 멈추면 모터 목표가 지금 실제 자세가 되어
-    # '처지는 만큼 높게' 잡은 목표로 위로 끌려 올라가지 않는다
+    # 누르기 = 접근점 → 누름점(면 + depth) → (안 닿으면 seek 만큼 더) 한 줄의 곧은 선. 11-16: MoveIt PTP 대신.
+    # 찌르는 방향(push_yaw)이 벽 법선이면 버튼이 옆에 있어도 손끝이 벽에 수직으로 들어간다 — 10-22 실물: 버튼이
+    # 팔 축에서 10~12 cm 옆(밑동 10.7~11.8°)일 때 방사 방향으로 찔러 9 번 중 1 번만 눌림(정면은 7 번 중 3 번)
+    u, _ = push_frame(button, args.push_yaw)
+    seek = args.seek if args.depth >= 0 else 0.0           # 연습(--depth 음수)은 더 밀지 않는다
+    end = tuple(p + seek * c for p, c in zip(press, u))
+    q_app = list(n.cur)
+
+    def replan_to(xyz):
+        return lambda cur: line_traj(cur, xyz, args.press_vel)[0]
+
+    print("\n[버튼 누르기]")
+    n.stage = "버튼 누르기"
+    n.say()
+    traj, sec, pts = line_traj(n.cur, end, args.press_vel)
+    if traj is None:
+        return f"버튼 누르기 선을 못 풂({sec})"
+    why = n.path_blocked(pts[::5] + [pts[-1]])
+    if why:
+        return f"버튼 누르기 선이 MoveIt 장애물에 걸림({why})"
+    incid = math.degrees(math.remainder(pts[-1][0] - math.atan2(u[1], u[0]), 2 * math.pi))   # 막대 방향 = joint1
+    line_cm = math.dist(geom.fk(n.cur)[0], end) * 100
+    print(f"  곧은 선 {line_cm:.1f} cm(누름점 면 {args.depth * 100:+.1f} cm" + (f" + 찾기 {seek * 100:.1f} cm" if seek else "")
+          + f"), 약 {sec:.1f}초 — 막대가 찌르는 방향과 {incid:+.1f}° 기욺")
+    n.disp_pub.publish(DisplayTrajectory(trajectory=[traj]))
+    if not args.yes and input("  RViz 에서 경로를 확인하고 Enter = 실행 / q = 중단 : ").strip().lower() == "q":
+        return "버튼 누르기 앞에서 사용자가 중단"
+    shots_at = []                                          # 막대 끝이 계산한 면 1 cm 앞을 지나는 시각에 한 장
+    for p in traj.joint_trajectory.points:
+        if tip_vs_button(p.positions, button, args.push_yaw)[0] >= -0.01:
+            shots_at.append((p.time_from_start.sec + p.time_from_start.nanosec * 1e-9, "pre1cm"))
+            break
+    # 1 단계: 선을 따라 밀다 닿으면(전류) 그 자리에서 멈춘다. 멈추면 모터 목표가 지금 실제 자세가 되어
+    # '처지는 만큼 높게' 잡은 목표로 위로 끌려 올라가지 않는다. 누름점까지 안 닿으면 seek 만큼 더 가며 찾는다
     t = time.time()
-    ok = n.execute(traj, base=base, stop_ma=args.contact_ma, n_over=CONTACT_N, why="닿음", light=light)
+    ok = n.execute(traj, replan=replan_to(end), base=base, stop_ma=args.contact_ma, n_over=CONTACT_N, why="닿음",
+                   light=light, shots_at=shots_at)
     if ok is False:
-        print("  실행 거부 — 자리 잡고 한 번 더 계획")
+        print("  실행 거부 — 자리 잡고 한 번 더")
         n.settle(timeout=1.0)
-        traj = n.plan_any(j_prs, args.press_vel)
+        traj = line_traj(n.cur, end, args.press_vel)[0]
         if traj is not None:
             t = time.time()
-            ok = n.execute(traj, base=base, stop_ma=args.contact_ma, n_over=CONTACT_N, why="닿음", light=light)
+            ok = n.execute(traj, replan=replan_to(end), base=base, stop_ma=args.contact_ma, n_over=CONTACT_N,
+                           why="닿음", light=light)
     timing["누르기"] = (n.trip_t or time.time()) - t
     if ok not in (True, "불 켜짐", "닿음"):
         return home_after_hand(n, args, prof, timing, why_moved("버튼 누르기", ok)) if ok == HAND \
             else "버튼 누르기 실행 실패"
+    q_stop = list(n.cur)
+    stop_at = tip_vs_button(q_stop, button, args.push_yaw)
+    if ok in ("닿음", "불 켜짐"):
+        print(f"  {ok} 자리: 막대 끝이 계산한 버튼 면보다 {stop_at[0] * 100:+.1f} cm "
+              "(− = 면보다 앞에서 닿음 = 버튼이 카메라로 잰 것보다 가까움)")
     touched, lit_seen, post_fail = ok == "닿음", ok == "불 켜짐", None
     if touched and args.push > 0:
-        # 2 단계: 지금 실제 자세에서 높이·막대 기울기는 그대로, 앞으로만 push 만큼 더 민다
+        # 2 단계: 지금 실제 자리에서 높이·막대 기울기는 그대로, 찌르는 방향으로만 push 만큼 더 민다
         t = time.time()
-        q_push = forward_push(n.cur, args.push)
-        print(f"  [앞으로 {args.push * 1000:.0f} mm 더 누르기] 지금 자세에서 높이는 그대로")
-        traj2 = n.plan_any(q_push, args.press_vel)
+        (tx, ty, tz), _ = geom.fk(n.cur)
+        p_end = (tx + args.push * u[0], ty + args.push * u[1], tz)
+        print(f"  [앞으로 {args.push * 1000:.0f} mm 더 누르기] 찌르는 방향으로 곧게, 높이는 그대로")
+        traj2, why2, _ = line_traj(n.cur, p_end, args.press_vel)
         if traj2 is not None:
-            ok2 = n.execute(traj2, base=base, stop_ma=args.contact_ma + args.push_ma, n_over=CONTACT_N,
-                            why="너무 셈", light=light)
+            ok2 = n.execute(traj2, replan=replan_to(p_end), base=base, stop_ma=args.contact_ma + args.push_ma,
+                            n_over=CONTACT_N, why="너무 셈", light=light)
             lit_seen = lit_seen or ok2 == "불 켜짐"
+        else:
+            print(f"  더 누르기 선을 못 풂({why2}) — 건너뜀")
         timing["더 누르기"] = time.time() - t
-    (tx, ty, _), _ = geom.fk(n.cur)
-    reach = math.hypot(tx - geom.J1_X, ty)                     # 밑동에서 막대 끝까지(찌르는 방향)
-    gap = math.hypot(press[0] - geom.J1_X, press[1]) - reach
-    where = (f"밑동에서 막대 끝 {reach:.3f} m — 계산한 누름점보다 {gap * 100:.1f} cm 앞 "
-             f"(누름점 = 버튼 면 {args.depth * 100:+.1f} cm)")
-    print(f"  {'불이 켜져 멈춘' if lit_seen else '누름점에 간'} 자리: {where}")
+    end_at = tip_vs_button(n.cur, button, args.push_yaw)
+    where = (f"막대 끝이 계산한 버튼 면보다 {end_at[0] * 100:+.1f} cm "
+             f"(누름점 = 면 {args.depth * 100:+.1f} cm" + (f", 찾기 끝 = 면 {(args.depth + seek) * 100:+.1f} cm)" if seek else ")"))
+    print(f"  {'불이 켜져 멈춘' if lit_seen else '누르기를 마친'} 자리: {where}")
+    cm = lambda v: [round(x * 100, 2) for x in v]           # noqa: E731
+    rnd = lambda q: [round(float(x), 4) for x in q]          # noqa: E731
+    push_log = {"mode": "radial" if args.push_yaw is None else "wall",
+                "yaw_deg": None if args.push_yaw is None else round(math.degrees(args.push_yaw), 1),
+                "rod_vs_push_deg": round(incid, 1), "seek_cm": round(seek * 100, 1),
+                "button": rnd(button), "press": rnd(press), "end": rnd(end),
+                "j_app_cmd": rnd(j_app), "j_app": rnd(q_app), "j_stop": rnd(q_stop), "j_end": rnd(n.cur),
+                "stop": str(ok),
+                # 손끝(관절 각도로 계산) − 계산한 버튼 면, cm [앞으로, 오른쪽, 위]. 처짐은 관절 각도에 안 잡혀 여기 안 보인다
+                "stop_vs_button_cm": cm(stop_at), "end_vs_button_cm": cm(end_at)}
     if not lit_seen and args.depth >= 0:
         # 누름점(면 + depth)에 누른 채 서 있으면 모터가 계속 민다. 10-21 실물: 버튼은 그 사이 1~2 s 안에 눌렸다.
         # 닿음 전류가 안 올랐어도 기다린다(10-21 저녁: 안 기다리고 바로 홈 → 못 누르고 돌아옴)
@@ -1717,6 +1832,15 @@ def run_steps(n, args, j_app, j_prs, press, timing, T0, button, prof):
         else:
             failed = move(f"뒤로 {args.retract * 100:.0f} cm 빼기", back, args.retract_vel, None, "빼기")
             settle = "quick"
+    # 사진마다 버튼 빨간 화살표 자리(바로 세운 화면 px). 접근점 → 1 cm 앞 → 닿음 사이에 얼마나 움직였는지 = 누르러 가며
+    # 생긴 높이·좌우 어긋남(카메라와 막대가 한 몸). 색으로 찾는 것이라 틀릴 수 있다 — sheet.jpg 로 확인
+    aim_full = dict(load_aim())
+    push_log["arrow_uv"] = {}
+    for k in ("base", "pre1cm", "touch", "stop_lit"):
+        if k in n.shots:
+            img = n.shots[k][0]
+            mk = find_marker(img, dict(aim_full, window=[0, 0, img.shape[1], img.shape[0]]))
+            push_log["arrow_uv"][k] = None if mk is None else [round(mk[0], 1), round(mk[1], 1)]
     saver, saved = None, {}
     d = os.path.join(photo_dir, time.strftime("%Y%m%d_%H%M%S") + "_" + args.target) if photo_dir else None
     if d and n.shots:
@@ -1749,7 +1873,7 @@ def run_steps(n, args, j_app, j_prs, press, timing, T0, button, prof):
                           {"target": args.target, "result": how or failed, "red_base": red0,
                            "depth": args.depth, "contact_ma": args.contact_ma, "z_up": args.z_up,
                            "retract": args.retract, "watch": args.watch, "mid": n.mid_log, "aim": aim_log,
-                           "timing": {k: round(v, 2) for k, v in timing.items()}})
+                           "push": push_log, "timing": {k: round(v, 2) for k, v in timing.items()}})
             print(f"사진: {d}")
         except OSError as e:
             print(f"사진을 못 남김: {e}")

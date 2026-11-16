@@ -106,17 +106,41 @@ def press_ik(x, y, z, pitch=0.0):
     return j, ""
 
 
-def approach_and_press(button_xyz, standoff=0.06, depth=0.005):
-    """버튼 앞 standoff 지점과, 표면보다 depth 만큼 들어간 지점.
+def push_dir(button_xyz, yaw=None):
+    """찌르는 방향(world 수평 단위 벡터 ux, uy). yaw(rad) = 벽 법선 방향(벽 쪽으로). None = 밑동에서 버튼 쪽(방사 방향)."""
+    x, y, _ = button_xyz
+    a = math.atan2(y, x - J1_X) if yaw is None else yaw
+    return math.cos(a), math.sin(a)
 
-    4자유도 팔은 밑동에서 바깥쪽(방사 방향)으로만 수평으로 찌를 수 있다.
+
+def approach_and_press(button_xyz, standoff=0.06, depth=0.005, yaw=None):
+    """버튼 앞 standoff 지점과, 표면보다 depth 만큼 들어간 지점. 둘 다 찌르는 방향(push_dir) 위에 있다.
+
+    4자유도 팔은 막대 방향(밑동 → 손끝, 수평)을 고를 수 없지만 손끝 자리는 3자유도라 어느 방향으로든 곧게 옮길 수 있다.
+    yaw = None 이면 밑동에서 바깥쪽(방사 방향, 11-16 전 방식) — 버튼이 옆에 있으면 벽을 비스듬히 민다.
+    yaw = 벽 법선이면 손끝이 벽에 수직으로 들어간다(막대만 밑동 쪽으로 기운 채).
     """
     x, y, z = button_xyz
-    a = math.atan2(y, x - J1_X)
-    ux, uy = math.cos(a), math.sin(a)
+    ux, uy = push_dir(button_xyz, yaw)
     approach = (x - standoff * ux, y - standoff * uy, z)
     press = (x + depth * ux, y + depth * uy, z)
     return approach, press
+
+
+def line_joints(start_xyz, end_xyz, pitch=0.0, step=0.002):
+    """start → end 곧은 선을 step(m) 간격으로 나눠 IK 로 푼 관절값 목록(start 는 빼고 end 는 넣는다).
+    못 푸는 점이 있으면 (None, 이유)."""
+    d = math.dist(start_xyz, end_xyz)
+    n = max(1, int(math.ceil(d / step)))
+    out = []
+    for k in range(1, n + 1):
+        s = k / n
+        p = tuple(a + (b - a) * s for a, b in zip(start_xyz, end_xyz))
+        j, why = press_ik(*p, pitch)
+        if j is None:
+            return None, f"선 위 {s * d * 100:.1f} cm 지점: {why}"
+        out.append(list(j))
+    return out, ""
 
 
 if __name__ == "__main__":
