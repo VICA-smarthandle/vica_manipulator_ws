@@ -98,9 +98,11 @@ bash run/all.sh                  # 시연: 카메라 없이 저장된 경로로 
 | `/arm/press_up`, `/arm/press_down` | 호출 버튼 누르기 |
 | `/arm/press_f1` ~ `/arm/press_f4` | 층 버튼 누르기 후 해당 층 도착까지 불빛 감시 |
 | `/arm/my_floor` | 문 열렸을 때 목표 층인지 확인 |
+| `/arm/demo` | 시연 한 번: 관찰 → 저장한 버튼 자리(`demo.service_target`, 기본 down)로 뻗기 → 홈. 손 인식으로만 멈춤(`run/demo_hand.sh` 와 같은 동작). 버튼판이 없어도 끝까지 뻗고 홈에 오면 성공 |
 
 ```bash
 ROS_DOMAIN_ID=77 ros2 service call /arm/press_down std_srvs/srv/Trigger
+ROS_DOMAIN_ID=77 ros2 service call /arm/demo std_srvs/srv/Trigger     # NX 앱 시연 버튼
 ```
 
 ## 안전

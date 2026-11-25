@@ -9,6 +9,12 @@ NX 에서 (주행 프로그램은 7 에 그대로 두고 이 한 줄만 77 로 �
   ROS_DOMAIN_ID=77 ros2 service call /arm/press_down std_srvs/srv/Trigger
   ROS_DOMAIN_ID=77 ros2 service call /arm/press_f3 std_srvs/srv/Trigger     엘베 안 층 버튼(f1~f4). 오른쪽 관찰 자세
   ROS_DOMAIN_ID=77 ros2 service call /arm/home std_srvs/srv/Trigger
+  ROS_DOMAIN_ID=77 ros2 service call /arm/demo std_srvs/srv/Trigger         시연 한 번(카메라로 안 찾고 저장한 버튼 자리로)
+
+/arm/demo(11-25 사용자: NX 앱 실행 버튼으로 시연) = run/demo_hand.sh 의 누르기 한 번과 같다:
+press.py <demo.service_target> --observe --yes --blind --no-path-guard. 관찰 자세 → 저장한 버튼 자리로 뻗기 → 홈.
+손 인식(hand_guard)으로만 멈추고 깊이 길목 신호등은 끈다(앞에 벽이 없는 시연장). 버튼판이 없어 '닿음 없음·불 안 켜짐'
+으로 끝나도 끝까지 뻗고 홈에 왔으면 시연 성공으로 답한다. 손이 오래 있어 그만뒀거나 계획 실패·비상정지면 실패.
 
 관찰 자세·높이 보정·누름 깊이·닿음 기준·속도는 config/press.yaml(hall = up·down, floor = f1~f4)을 pose.py·press.py 가
 읽는다. 누르는 동안 버튼에 빨간불이 들어오면 바로 멈추고(먼저), 불을 못 보면 전류로 닿음을 본다.
@@ -65,6 +71,9 @@ ESTOP_REQUIRED = os.environ.get('VICA_ESTOP_REQUIRED', '1') != '0'
 HOME_TOL = 0.1                 # rad. 모든 관절이 홈과 이만큼 안이면 '홈' (pose.py NEAR_HOME 과 같음)
 MY_FLOOR_GRACE = 2.0           # /arm/my_floor: 문이 열려도 불이 아직 켜져 있으면 이만큼 더 본다(꺼짐과 열림이 거의 같은 때)
 WATCH_START_SEC = 120          # 엘베 안 누르기: 이 안에 '지켜보기 시작' 이 없으면 끊는다
+DEMO_ARGS = ['--observe', '--yes', '--blind', '--no-path-guard']   # /arm/demo = run/demo_hand.sh 와 같은 옵션
+DEMO_REACHED = ('누름 완료', '닿았지만 불이 안 켜짐', '닿음 감지 없음')   # press.py 마지막 줄 — 누름점까지 뻗었다
+DEMO_TIMEOUT = 180             # 손 때문에 멈췄다 이어가면(최대 guard.wait_sec 20 s) 평소 24 s 보다 길어진다
 
 
 class EstopListener:
@@ -117,12 +126,13 @@ class ArmService(Node):
         self.create_subscription(JointState, '/joint_states', self.js, 10, callback_group=cb)
         self.create_service(Trigger, '/arm/status', self.status, callback_group=cb)
         self.create_service(Trigger, '/arm/home', self.home, callback_group=cb)
+        self.create_service(Trigger, '/arm/demo', self.demo, callback_group=cb)
         self.create_service(Trigger, '/arm/my_floor', self.my_floor, callback_group=cb)
         self.create_service(Trigger, '/arm/press_up', lambda q, r: self.press('up', r), callback_group=cb)
         self.create_service(Trigger, '/arm/press_down', lambda q, r: self.press('down', r), callback_group=cb)
         for f in FLOORS:
             self.create_service(Trigger, f'/arm/press_{f}', lambda q, r, f=f: self.press(f, r), callback_group=cb)
-        print('팔 서비스 준비: /arm/status /arm/home /arm/press_up /arm/press_down /arm/press_f1~f4 /arm/my_floor '
+        print('팔 서비스 준비: /arm/status /arm/home /arm/demo /arm/press_up /arm/press_down /arm/press_f1~f4 /arm/my_floor '
               f'(도메인 {os.environ.get("ROS_DOMAIN_ID", "?")}), '
               f'비상정지는 도메인 {ESTOP_DOMAIN} {ESTOP_TOPIC} 를 듣는다', flush=True)
 
@@ -398,6 +408,40 @@ class ArmService(Node):
         finally:
             self.get_logger().info(f'결과: {res.message}')
             self._end()
+
+    def demo(self, req, res):
+        """시연 한 번(NX 앱 실행 버튼). run/demo_hand.sh 의 누르기와 같다 — 저장한 버튼 자리로 뻗고 홈."""
+        target = str((load_demo_cfg() or {}).get('service_target', 'down'))
+        if not self._start(f'시연({target})', res):
+            return res
+        self.ride = {}
+        t0 = time.time()
+        try:
+            ok, last = self.run(['press.py', target] + DEMO_ARGS, DEMO_TIMEOUT)
+            if self._aborted('시연', res):
+                return res
+            reached = ok or any(s in last for s in DEMO_REACHED)
+            tail = self.safe_home()[1] if self.away_from_home() else '홈 도착'
+            if reached and tail == '홈 도착':
+                touch = ('눌림 확인' if '누름 완료' in last else '닿음, 불 안 켜짐' if '닿았지만' in last
+                         else '닿음 없음(버튼판 없음)')
+                res.success, res.message = True, f'시연 완료({target}, {touch}) → 홈 ({time.time() - t0:.0f}초)'
+            else:
+                res.success, res.message = False, f'시연 실패({target}): {last} → {tail}'
+            return res
+        finally:
+            self.get_logger().info(f'결과: {res.message}')
+            self._end()
+
+
+def load_demo_cfg():
+    """config/press.yaml 의 demo 묶음(없으면 None)."""
+    try:
+        import yaml
+        with open(os.path.join(TOOLS, '..', 'config', 'press.yaml')) as f:
+            return yaml.safe_load(f).get('demo')
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def main():
