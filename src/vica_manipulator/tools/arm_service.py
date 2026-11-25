@@ -53,7 +53,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from std_srvs.srv import Trigger
+from std_srvs.srv import SetBool, Trigger
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
@@ -73,6 +73,13 @@ ESTOP_REQUIRED = os.environ.get('VICA_ESTOP_REQUIRED', '1') != '0'
 HOME_TOL = 0.1                 # rad. 모든 관절이 홈과 이만큼 안이면 '홈' (pose.py NEAR_HOME 과 같음)
 MY_FLOOR_GRACE = 2.0           # /arm/my_floor: 문이 열려도 불이 아직 켜져 있으면 이만큼 더 본다(꺼짐과 열림이 거의 같은 때)
 WATCH_START_SEC = 120          # 엘베 안 누르기: 이 안에 '지켜보기 시작' 이 없으면 끊는다
+# 11-25 사용자(모터 발열·과부하 걱정): 쉬는 동안은 홈(지지대 위)에서 힘을 뺀다. 명령이 오면 힘을 켜고 홈 → 동작 → 홈 → 다시 뺀다.
+# 홈은 어깨·팔꿈치가 지지대보다 1도 위라 힘을 켜 두면 두 모터가 팔 무게를 계속 든다(11-25 홈 15분: 팔꿈치 42 ℃).
+# 힘을 빼면 손목(막대)이 아래로 떨어지고, 켜면 홈으로 다시 올린다. 끄려면 VICA_IDLE_TORQUE_OFF=0
+IDLE_TORQUE_OFF = os.environ.get('VICA_IDLE_TORQUE_OFF', '1') != '0'
+TORQUE_SRV = '/dynamixel_hardware_interface/set_dxl_torque'
+WAKE_SETTLE_SEC = 4.0          # 힘을 켠 뒤 모터가 스스로 홈으로 가는지 기다리는 최대 시간(손목 30도 ≈ 0.48 rad/s 로 1 s 남짓)
+WAKE_TOL = 0.03                # rad. 이 안이면 홈에 온 것으로 본다. 아니면 MoveIt 으로 홈(pose.py)
 DEMO_ARGS = ['--observe', '--yes', '--blind', '--no-path-guard']   # /arm/demo = run/demo_hand.sh 와 같은 옵션
 DEMO_REACHED = ('누름 완료', '닿았지만 불이 안 켜짐', '닿음 감지 없음')   # press.py 마지막 줄 — 누름점까지 뻗었다
 DEMO_TIMEOUT = 180             # 손 때문에 멈췄다 이어가면(최대 guard.wait_sec 20 s) 평소 24 s 보다 길어진다
@@ -119,6 +126,8 @@ class ArmService(Node):
         self.child_lock = threading.Lock()
         self.estop_abort = False           # 비상정지로 지금 작업을 끊었다
         self.estop = EstopListener(ESTOP_DOMAIN)
+        self.torque_off = False            # 쉬는 동안 힘을 뺐다(홈, 지지대 위)
+        self.torque_cli = self.create_client(SetBool, TORQUE_SRV, callback_group=cb)
         self.ride = {}                     # 엘베 안 지켜보기 {target, state: pressing·watching·arrived·home·stopped, msg}
         self.ride_done = threading.Event()
         self.ride_pub = self.create_publisher(String, '/arm/ride', QoSProfile(
@@ -134,6 +143,8 @@ class ArmService(Node):
         self.create_service(Trigger, '/arm/press_down', lambda q, r: self.press('down', r), callback_group=cb)
         for f in FLOORS:
             self.create_service(Trigger, f'/arm/press_{f}', lambda q, r, f=f: self.press(f, r), callback_group=cb)
+        if IDLE_TORQUE_OFF:
+            threading.Thread(target=self._relax_at_start, daemon=True).start()
         print('팔 서비스 준비: /arm/status /arm/home /arm/demo /arm/press_up /arm/press_down /arm/press_f1~f4 /arm/my_floor '
               f'(도메인 {os.environ.get("ROS_DOMAIN_ID", "?")}), '
               f'비상정지는 도메인 {ESTOP_DOMAIN} {ESTOP_TOPIC} 를 듣는다', flush=True)
@@ -160,7 +171,66 @@ class ArmService(Node):
         return p.returncode == 0, (lines[-1].strip() if lines else '')
 
     def away_from_home(self):
-        return self.cur is not None and max(abs(c - h) for c, h in zip(self.cur, HOME)) > HOME_TOL
+        if self.torque_off:                # 홈에서 힘을 빼 지지대에 얹혀 있다(손목만 떨어져 있음) = 홈으로 본다
+            return False
+        return self.cur is not None and self.home_err() > HOME_TOL
+
+    def home_err(self):
+        return max(abs(c - h) for c, h in zip(self.cur, HOME)) if self.cur else float('inf')
+
+    def set_torque(self, on):
+        """팔 드라이버의 힘 켜기·끄기 서비스. (성공, 이유). 가짜 팔처럼 서비스가 없으면 (None, 이유)."""
+        if not self.torque_cli.wait_for_service(timeout_sec=1.0):
+            return None, f'{TORQUE_SRV} 없음(가짜 팔?)'
+        f = self.torque_cli.call_async(SetBool.Request(data=on))
+        t = time.time()
+        while not f.done() and time.time() - t < 3.0:
+            time.sleep(0.02)
+        if not f.done():
+            return False, '힘 켜기·끄기 답 없음'
+        return True, f.result().message
+
+    def relax(self, why):
+        """홈에 있으면 힘을 뺀다. 홈이 아니면(펴진 채) 빼지 않는다 — 팔이 떨어진다."""
+        if not IDLE_TORQUE_OFF or self.torque_off or self.home_err() > HOME_TOL:
+            return
+        ok, msg = self.set_torque(False)
+        if ok:
+            self.torque_off = True
+            self.get_logger().info(f'힘 뺌({why}) — 홈에서 쉬는 중')
+        elif ok is False:
+            self.get_logger().warn(f'힘 빼기 실패: {msg} — 힘을 켠 채 기다린다')
+
+    def wake(self):
+        """쉬던 팔에 힘을 켜고 홈으로. (True, '') 또는 (False, 이유)."""
+        if not self.torque_off:
+            return True, ''
+        ok, msg = self.set_torque(True)
+        if not ok:
+            return False, f'힘을 못 켬: {msg}'
+        self.torque_off = False
+        t = time.time()
+        while time.time() - t < WAKE_SETTLE_SEC and self.home_err() > WAKE_TOL:
+            time.sleep(0.05)
+        err = self.home_err()
+        self.get_logger().info(f'힘 켬 — {time.time() - t:.1f}초 뒤 홈과 최대 {math.degrees(err):.1f}도')
+        if err > WAKE_TOL:                 # 스스로 홈에 안 갔다 → MoveIt 으로 천천히 홈
+            ok, last = self.run(['pose.py', 'home', '--yes'], 60)
+            if not ok:
+                return False, f'힘을 켠 뒤 홈으로 못 감: {last}'
+        return True, ''
+
+    def _relax_at_start(self):
+        """서비스가 뜬 뒤(all.sh 는 홈 이동이 끝난 뒤 띄운다) 홈이면 힘을 뺀다."""
+        t = time.time()
+        while self.cur is None and time.time() - t < 10:
+            time.sleep(0.2)
+        time.sleep(1.0)
+        if self.busy.acquire(blocking=False):
+            try:
+                self.relax('서비스 시작')
+            finally:
+                self.busy.release()
 
     def watch_estop(self):
         """0.2 s 마다. 비상정지가 켜져 있고 팔이 홈이 아니면 멈추고 저속으로 홈. 작업 중 신호가 끊겨도 같다."""
@@ -194,7 +264,10 @@ class ArmService(Node):
             self.get_logger().warn(f'비상정지 홈: {tail}')
         finally:
             self.doing = ''
-            self.busy.release()
+            try:
+                self.relax('비상정지 홈 끝')
+            finally:
+                self.busy.release()
 
     def js(self, m):
         d = dict(zip(m.name, m.position))
@@ -206,6 +279,7 @@ class ArmService(Node):
         deg = ', '.join(f'{math.degrees(v):.1f}' for v in self.cur) if self.cur else '없음(run/arm.sh 꺼짐?)'
         res.message = (f'관절(도) [{deg}] / {"작업 중: " + self.doing if self.doing else "대기 중"}'
                        f' / 비상정지 {self.estop.text()}(도메인 {ESTOP_DOMAIN})'
+                       + (' / 힘 꺼짐(홈에서 쉬는 중)' if self.torque_off else '')
                        + (f' / 엘베 안 {self.ride["target"]} {self.ride["state"]}' if self.ride else ''))
         return res
 
@@ -234,12 +308,22 @@ class ArmService(Node):
             return False
         self.doing = what
         self.get_logger().info(f'요청 받음: {what}')
+        ok, why = self.wake()
+        if not ok:
+            self.doing = ''
+            self.busy.release()
+            res.success, res.message = False, f'거절: {why}'
+            self.get_logger().warn(res.message)
+            return False
         return True
 
     def _end(self):
         self.doing = ''
         self.estop_abort = False
-        self.busy.release()
+        try:
+            self.relax('작업 끝')
+        finally:
+            self.busy.release()
 
     def safe_home(self):
         """손끝을 6 cm 뺀 뒤 홈. message 꼬리('홈 도착' 또는 '홈 복귀 실패: …')와 성공 여부를 돌려준다."""
