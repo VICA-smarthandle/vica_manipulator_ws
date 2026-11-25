@@ -23,7 +23,7 @@ from dynamixel_sdk import COMM_SUCCESS, PacketHandler, PortHandler
 
 PORT = '/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_83315A9250323952582E3120FF05251B-if00'
 IDS = (11, 12, 13, 14)                      # joint1~4
-HOME = [-0.023, -1.535, 1.540, 0.724]       # press.HOME 과 같은 값
+HOME = [0.016, -1.535, 1.540, 0.724]        # press.HOME 과 같은 값
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'paths')
 LATEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest.json')   # buttons.py 가 쓰는 찾은 버튼
 

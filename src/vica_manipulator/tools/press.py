@@ -54,7 +54,7 @@ from path_guard import Guard, debug_image, depth_array  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOINTS = ["joint1", "joint2", "joint3", "joint4"]
-HOME = [-0.023, -1.535, 1.540, 0.724]     # SRDF home 과 같은 값 (납작 접기. 10-18 닿기 1도 앞으로, 11-09 밑동 -1.3도·손목 41.5도)
+HOME = [0.016, -1.535, 1.540, 0.724]      # SRDF home 과 같은 값 (납작 접기. 10-18 닿기 1도 앞으로, 11-25 재조립 뒤 밑동 +0.9도, 손목 41.5도)
 # 밑동을 크게 돌 때 거치는 '세운 자세'. 10-22 사용자: 짐칸에 큰 박스가 실려 있어 접힌 채 돌면 위팔(홈에서 뒤로 수평)이
 # 짐칸·박스 쪽을 쓸고 지나간다 → 세우고 → 돌고 → 내린다. 손으로 기록한 길(config/paths)이 있으면 그 길이 먼저다(route).
 UPRIGHT = [-0.068, 0.068, 0.0]            # joint2~4: 위팔 수직·아래팔과 막대 수평(ㄱ자, 사용자 사진). joint1 은 그 자리 값
