@@ -2,7 +2,7 @@
 
 VICA 다층 이동을 위한 엘리베이터 버튼 누르기 매니퓰레이터 ROS 2 워크스페이스.
 
-- **하드웨어**: OpenMANIPULATOR-X 기반 4축 팔(상완 355 · 전완 375 mm), 누름 막대 FR12_H104, 손목 카메라 Astra Mini S, 제어보드 OpenRB-150
+- **하드웨어**: OpenMANIPULATOR-X 기반 4축 팔(상완 357 · 전완 365 mm, 축↔축 — 2026-11-25 링크·마운트 일체형 재출력), 누름 막대 FR12_H104, 손목 카메라 Astra Mini S, 제어보드 OpenRB-150
 - **플랫폼**: Jetson Orin Nano, Ubuntu 22.04, ROS 2 Humble
 - **기능**: YOLO로 버튼 인식 → MoveIt으로 접근 → 누름 → 불빛으로 눌림 확인 → 홈 복귀. NX(주행 보드)가 ROS 서비스로 호출
 

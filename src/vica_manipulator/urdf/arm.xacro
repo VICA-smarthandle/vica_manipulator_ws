@@ -11,10 +11,16 @@
     <!-- 2026-10-02 VICA - 3D 프린트 장링크. 축↔축 실측
            상완 130.2 → 355 mm (앞으로 24 mm, 꺾임각 3.88°)
            전완 124   → 375 mm (꺾임 없음)
-           흰 각재 307 mm, 단면 21.5(앞뒤·x) × 32.1(좌우·y) -->
+           흰 각재 307 mm, 단면 21.5(앞뒤·x) × 32.1(좌우·y)
+         2026-11-25 VICA - 링크·마운트 일체형으로 다시 출력(사용자 실측). 모터축 배치는 예전과 같다(상완 앞 24 mm 꺾임 그대로).
+           상완 ID12→13 축↔축 357 mm → 위 356.19 · 앞 24 mm(3.85°). 링크는 마운트까지 한 덩어리 — 상완 337 mm(12·13번 마운트 포함)
+           전완 ID13→14 축↔축 365 mm (꺾임 없음), 전완 링크 340 mm(13·14번 마운트 포함)
+           손목(ID14) 막대 마운트·카메라 자리는 그대로. 단면은 새 출력물을 아직 안 재서 예전 값 -->
       <xacro:property name="upper_arm_offset_x" value="0.024"/>
-      <xacro:property name="upper_arm_dz"       value="0.35419"/>
-      <xacro:property name="forearm_len"        value="0.375"/>
+      <xacro:property name="upper_arm_dz"       value="0.35619"/>
+      <xacro:property name="forearm_len"        value="0.365"/>
+      <xacro:property name="upper_link_len"     value="0.337"/>
+      <xacro:property name="forearm_link_len"   value="0.340"/>
       <xacro:property name="strut_t"            value="0.0215"/>
       <xacro:property name="strut_w"            value="0.0321"/>  
     
@@ -92,21 +98,21 @@
     </joint>
 
     <link name="${prefix}link3">
-     <!-- 어깨 브라켓 (순정) -->
+     <!-- 12번 모터 + 마운트 자리 (11-25 부터 마운트는 상완 링크와 일체형) -->
         <visual>
           <origin xyz="0 0 -0.002" rpy="0 0 0"/>
           <geometry><box size="0.040 0.052 0.028"/></geometry>
           <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
         </visual>
-        <!-- 흰 각재 (세로) -->
+        <!-- 상완 링크 (세로, 11-25 일체형 337 mm — 12·13번 마운트 포함). 두 축 가운데에 둔다 -->
         <visual>
-          <origin xyz="0 0 0.1731" rpy="0 0 0"/>
-          <geometry><box size="${strut_t} ${strut_w} 0.3222"/></geometry>
+          <origin xyz="0 0 ${upper_arm_dz/2}" rpy="0 0 0"/>
+          <geometry><box size="${strut_t} ${strut_w} ${upper_link_len}"/></geometry>
           <material name="vica_print"><color rgba="0.93 0.93 0.93 1.0"/></material>
         </visual>
-        <!-- 엘보 브라켓 (순정) — 24mm 꺾임을 만드는 부품 -->
+        <!-- 13번 모터 + 마운트 자리 — 24mm 꺾임(11-25 일체형에도 그대로) -->
         <visual>
-          <origin xyz="0.018 0 0.3559" rpy="0 0 0"/>
+          <origin xyz="0.018 0 ${upper_arm_dz + 0.0017}" rpy="0 0 0"/>
           <geometry><box size="0.060 0.052 0.046"/></geometry>
           <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
         </visual>
@@ -116,16 +122,16 @@
           <geometry><box size="0.040 0.052 0.032"/></geometry>
         </collision>
         <collision>
-          <origin xyz="0 0 0.1731" rpy="0 0 0"/>
-          <geometry><box size="${strut_t} ${strut_w} 0.3222"/></geometry>
+          <origin xyz="0 0 ${upper_arm_dz/2}" rpy="0 0 0"/>
+          <geometry><box size="${strut_t} ${strut_w} ${upper_link_len}"/></geometry>
         </collision>
         <collision>
-          <origin xyz="0.018 0 0.3559" rpy="0 0 0"/>
+          <origin xyz="0.018 0 ${upper_arm_dz + 0.0017}" rpy="0 0 0"/>
           <geometry><box size="0.060 0.052 0.046"/></geometry>
         </collision>
 
         <inertial>
-          <origin xyz="0.012 0 0.177" />
+          <origin xyz="0.012 0 ${upper_arm_dz/2}" />
           <mass value="0.22" />
           <inertia ixx="2.2e-03" ixy="0.0" ixz="0.0"
                    iyy="2.2e-03" iyz="0.0"
@@ -144,21 +150,21 @@
     </joint>
 
     <link name="${prefix}link4">
-     <!-- 엘보측 브라켓 (순정) -->
+     <!-- 13번 모터 + 마운트 자리 (11-25 부터 마운트는 전완 링크와 일체형) -->
         <visual>
           <origin xyz="0.004 0 0" rpy="0 0 0"/>
           <geometry><box size="0.048 0.053 0.040"/></geometry>
           <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
         </visual>
-        <!-- 흰 각재 (가로) -->
+        <!-- 전완 링크 (가로, 11-25 일체형 340 mm — 13·14번 마운트 포함). 두 축 가운데에 둔다 -->
         <visual>
-          <origin xyz="0.182 0 0" rpy="0 0 0"/>
-          <geometry><box size="0.308 ${strut_w} ${strut_t}"/></geometry>
+          <origin xyz="${forearm_len/2} 0 0" rpy="0 0 0"/>
+          <geometry><box size="${forearm_link_len} ${strut_w} ${strut_t}"/></geometry>
           <material name="vica_print"><color rgba="0.93 0.93 0.93 1.0"/></material>
         </visual>
-        <!-- 손목 브라켓 (순정) -->
+        <!-- 14번 모터 + 마운트 자리 -->
         <visual>
-          <origin xyz="0.367 0 0" rpy="0 0 0"/>
+          <origin xyz="${forearm_len - 0.008} 0 0" rpy="0 0 0"/>
           <geometry><box size="0.062 0.040 0.048"/></geometry>
           <material name="grey"><color rgba="0.2 0.2 0.2 1"/></material>
         </visual>
@@ -168,16 +174,16 @@
           <geometry><box size="0.048 0.053 0.040"/></geometry>
         </collision>
         <collision>
-          <origin xyz="0.182 0 0" rpy="0 0 0"/>
-          <geometry><box size="0.308 ${strut_w} ${strut_t}"/></geometry>
+          <origin xyz="${forearm_len/2} 0 0" rpy="0 0 0"/>
+          <geometry><box size="${forearm_link_len} ${strut_w} ${strut_t}"/></geometry>
         </collision>
         <collision>
-          <origin xyz="0.367 0 0" rpy="0 0 0"/>
+          <origin xyz="${forearm_len - 0.008} 0 0" rpy="0 0 0"/>
           <geometry><box size="0.062 0.040 0.048"/></geometry>
         </collision>
 
         <inertial>
-          <origin xyz="0.188 0 0" />
+          <origin xyz="${forearm_len/2} 0 0" />
           <mass value="0.21" />
           <inertia ixx="4.0e-05" ixy="0.0" ixz="0.0"
                    iyy="2.5e-03" iyz="0.0"
