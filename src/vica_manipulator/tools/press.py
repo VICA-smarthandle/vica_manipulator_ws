@@ -26,7 +26,7 @@
 line_traj)이다. 찌르는 방향은 config push_yaw_deg(벽 법선, 호출 버튼 0 = AMR 정면 벽에 수직), 없으면 방사 방향.
 누름점까지 안 닿으면 같은 선으로 seek 만큼 더 밀며 닿음을 찾는다. 단계별 손끝·화살표 자리는 meta.json "push".
 """
-import argparse, json, math, os, shutil, signal, sys, threading, time
+import argparse, atexit, json, math, os, shutil, signal, sys, threading, time
 
 import cv2
 import numpy as np
@@ -234,6 +234,62 @@ def load_mid():
 REAL_DOMAIN = "77"        # 나노 실물 팔(run/common.sh 기본). 가짜 팔·노트북 시험은 78·79
 
 
+class _Tee:
+    """화면 출력을 그대로 내보내면서 줄마다 (시작부터 초, 줄) 로 모은다 → 끝날 때 기록 폴더의 console.txt.
+    11-25 사용자: 손을 대면 멈췄다가 굳는 현상 — 그때 화면 출력이 남지 않아 '실행 실패' 이유를 알 수 없었다."""
+
+    lines, t0 = [], time.time()
+
+    def __init__(self, stream):
+        self.s, self.part = stream, ""
+
+    def write(self, x):
+        self.s.write(x)
+        self.part += x.replace("\r", "\n")
+        while "\n" in self.part:
+            ln, self.part = self.part.split("\n", 1)
+            if ln.strip():
+                _Tee.lines.append((time.time() - _Tee.t0, ln))
+        return len(x)
+
+    def flush(self):
+        self.s.flush()
+
+    def __getattr__(self, k):
+        return getattr(self.s, k)
+
+
+CONSOLE = {"dir": None, "target": None, "on": False}   # dir = 이번 기록 폴더(finish_photos 가 정함)
+
+
+def _write_console():
+    """끝날 때(정상·sys.exit·Ctrl+C) 화면 출력을 console.txt 로. 사진 폴더가 없던 회차(사진 찍기 전에 끝남)는
+    폴더를 새로 만들어 console.txt 와 결과만 담은 meta.json 을 쓴다."""
+    if not CONSOLE["on"] or not _Tee.lines:
+        return
+    for st in (sys.stdout, sys.stderr):
+        if isinstance(st, _Tee) and st.part.strip():
+            _Tee.lines.append((time.time() - _Tee.t0, st.part))
+            st.part = ""
+    d = CONSOLE["dir"]
+    try:
+        if d is None:
+            root = load_photo_dir()
+            if not root:
+                return
+            d = os.path.join(root, time.strftime("%Y%m%d_%H%M%S", time.localtime(_Tee.t0)) + "_" + str(CONSOLE["target"]))
+            os.makedirs(d, exist_ok=True)
+            if not os.path.exists(os.path.join(d, "meta.json")):
+                with open(os.path.join(d, "meta.json"), "w") as f:
+                    json.dump({"target": CONSOLE["target"], "result": _Tee.lines[-1][1].strip(), "shots": {}},
+                              f, ensure_ascii=False, indent=1)
+        with open(os.path.join(d, "console.txt"), "w") as f:
+            f.write(f"# press.py {' '.join(sys.argv[1:])}  시작 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(_Tee.t0))}\n")
+            f.writelines(f"{t:7.2f}  {ln}\n" for t, ln in _Tee.lines)
+    except OSError:
+        pass
+
+
 def test_suffix():
     """도메인이 실물 팔(77)이 아니면 '_test<도메인>'. 사진 폴더·성공한 버튼 자리를 실물 것과 따로 둔다 —
     11-16 가짜 팔(79) 시험 3 회가 사진 폴더 최근 100 개 정리에 걸려 10-22 실물 기록 3 건을 지웠다."""
@@ -332,7 +388,9 @@ def save_photos(d, shots, lit):
 
 
 def finish_photos(root, d, shot_meta, lit, trace, info):
-    """meta.json·lit_trace.csv(누르는 동안 장마다 불빛 칸 빨강 점, 빈칸 = 화면 없음)를 쓰고 오래된 폴더를 지운다."""
+    """meta.json·lit_trace.csv(누르는 동안 장마다 불빛 칸 빨강 점, 빈칸 = 화면 없음)를 쓰고 오래된 폴더를 지운다.
+    화면 출력(console.txt)은 끝날 때 _write_console 이 같은 폴더에 쓴다."""
+    CONSOLE["dir"] = d
     with open(os.path.join(d, "lit_trace.csv"), "w") as f:
         f.write("t,red_px\n" + "".join(f"{t},{'' if c is None else c}\n" for t, c in trace))
     meta = dict(info, shots=shot_meta,
@@ -1336,6 +1394,10 @@ def main():
     ap.add_argument("--seek", type=float, default=None,
                     help="누름점까지 안 닿으면 같은 선으로 이만큼 더 밀며 닿음을 찾는다 m (기본 config/press.yaml seek)")
     args = ap.parse_args()
+    if not args.dry:                       # 화면 출력을 기록 폴더의 console.txt 로도 남긴다(--dry 는 안 남김)
+        sys.stdout, sys.stderr = _Tee(sys.stdout), _Tee(sys.stderr)
+        CONSOLE.update(target=args.target, on=True)
+        atexit.register(_write_console)
 
     group, prof, speed = load_profile(args.target)
     for key, val in (("depth", prof["depth"]), ("z_up", prof["z_up"]), ("contact_ma", prof["contact_ma"]),
