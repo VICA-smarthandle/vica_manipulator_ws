@@ -54,6 +54,10 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_srvs.srv import SetBool, Trigger
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
+from rclpy.action import ActionClient
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
@@ -78,8 +82,12 @@ WATCH_START_SEC = 120          # 엘베 안 누르기: 이 안에 '지켜보기 
 # 힘을 빼면 손목(막대)이 아래로 떨어지고, 켜면 홈으로 다시 올린다. 끄려면 VICA_IDLE_TORQUE_OFF=0
 IDLE_TORQUE_OFF = os.environ.get('VICA_IDLE_TORQUE_OFF', '1') != '0'
 TORQUE_SRV = '/dynamixel_hardware_interface/set_dxl_torque'
-WAKE_SETTLE_SEC = 4.0          # 힘을 켠 뒤 모터가 스스로 홈으로 가는지 기다리는 최대 시간(손목 30도 ≈ 0.48 rad/s 로 1 s 남짓)
-WAKE_TOL = 0.03                # rad. 이 안이면 홈에 온 것으로 본다. 아니면 MoveIt 으로 홈(pose.py)
+WAKE_TOL = 0.03                # rad. 깨운 뒤 이 안이면 홈에 온 것으로 본다. 아니면 MoveIt 으로 홈(pose.py)
+# 11-25 실물: 그냥 힘을 켜면 모터가 마지막 목표(홈)로 한 번에 뛰어 손목이 0.3 s 에 35도(≈2 rad/s) 올라가며 14번이 심하게 떨렸다.
+# → 켜기 전에 궤적 컨트롤러 목표를 지금(떨어진) 자세로 옮겨 두고(힘이 없어 안 움직임), 켠 뒤 홈까지 곧은 궤적으로 천천히 올린다.
+WAKE_VEL = 0.4                 # rad/s. 깨울 때 가장 많이 도는 관절의 평균 속도(손목 35도 ≈ 1.5 s)
+WAKE_MIN_SEC = 1.5
+JTC_ACTION = '/arm_controller/follow_joint_trajectory'
 DEMO_ARGS = ['--observe', '--yes', '--blind', '--no-path-guard']   # /arm/demo = run/demo_hand.sh 와 같은 옵션
 DEMO_REACHED = ('누름 완료', '닿았지만 불이 안 켜짐', '닿음 감지 없음')   # press.py 마지막 줄 — 누름점까지 뻗었다
 DEMO_TIMEOUT = 180             # 손 때문에 멈췄다 이어가면(최대 guard.wait_sec 20 s) 평소 24 s 보다 길어진다
@@ -128,6 +136,7 @@ class ArmService(Node):
         self.estop = EstopListener(ESTOP_DOMAIN)
         self.torque_off = False            # 쉬는 동안 힘을 뺐다(홈, 지지대 위)
         self.torque_cli = self.create_client(SetBool, TORQUE_SRV, callback_group=cb)
+        self.jtc = ActionClient(self, FollowJointTrajectory, JTC_ACTION, callback_group=cb)
         self.ride = {}                     # 엘베 안 지켜보기 {target, state: pressing·watching·arrived·home·stopped, msg}
         self.ride_done = threading.Event()
         self.ride_pub = self.create_publisher(String, '/arm/ride', QoSProfile(
@@ -201,20 +210,50 @@ class ArmService(Node):
         elif ok is False:
             self.get_logger().warn(f'힘 빼기 실패: {msg} — 힘을 켠 채 기다린다')
 
+    def send_traj(self, target, sec):
+        """궤적 컨트롤러에 지금 → target(관절값) 곧은 궤적 하나(끝 속도 0). 끝날 때까지 기다린다. (성공, 이유)."""
+        if not self.jtc.wait_for_server(timeout_sec=2.0):
+            return False, f'{JTC_ACTION} 없음'
+        g = FollowJointTrajectory.Goal()
+        g.trajectory.joint_names = list(JOINTS)
+        whole = int(sec)
+        g.trajectory.points = [JointTrajectoryPoint(positions=[float(v) for v in target], velocities=[0.0] * len(JOINTS),
+                                                    time_from_start=Duration(sec=whole, nanosec=int((sec - whole) * 1e9)))]
+        f = self.jtc.send_goal_async(g)
+        t = time.time()
+        while not f.done() and time.time() - t < 3.0:
+            time.sleep(0.02)
+        h = f.result() if f.done() else None
+        if h is None or not h.accepted:
+            return False, '궤적 거절'
+        r = h.get_result_async()
+        while not r.done() and time.time() - t < sec + 5.0:
+            time.sleep(0.02)
+        if not r.done():
+            return False, '궤적 시간 넘김'
+        code = r.result().result.error_code
+        return code == FollowJointTrajectory.Result.SUCCESSFUL, f'궤적 결과 {code}'
+
     def wake(self):
-        """쉬던 팔에 힘을 켜고 홈으로. (True, '') 또는 (False, 이유)."""
+        """쉬던 팔에 힘을 켜고 홈으로 천천히. (True, '') 또는 (False, 이유)."""
         if not self.torque_off:
             return True, ''
+        here = list(self.cur)
+        ok, msg = self.send_traj(here, 0.1)   # 힘이 꺼진 채 목표를 지금 자세로 → 켤 때 안 뛴다
+        if not ok:
+            self.get_logger().warn(f'켜기 전 목표 맞추기 실패({msg}) — 그대로 켠다')
         ok, msg = self.set_torque(True)
         if not ok:
             return False, f'힘을 못 켬: {msg}'
         self.torque_off = False
         t = time.time()
-        while time.time() - t < WAKE_SETTLE_SEC and self.home_err() > WAKE_TOL:
-            time.sleep(0.05)
+        far = max(abs(c - h) for c, h in zip(self.cur, HOME))
+        sec = max(WAKE_MIN_SEC, far / WAKE_VEL)
+        ok, msg = self.send_traj(HOME, sec)
         err = self.home_err()
-        self.get_logger().info(f'힘 켬 — {time.time() - t:.1f}초 뒤 홈과 최대 {math.degrees(err):.1f}도')
-        if err > WAKE_TOL:                 # 스스로 홈에 안 갔다 → MoveIt 으로 천천히 홈
+        self.get_logger().info(f'힘 켬 → 홈까지 {sec:.1f}초 궤적({"" if ok else msg + ", "}'
+                               f'{time.time() - t:.1f}초 뒤 홈과 최대 {math.degrees(err):.1f}도)')
+        if err > WAKE_TOL:                 # 홈에 안 왔다 → MoveIt 으로 천천히 홈
             ok, last = self.run(['pose.py', 'home', '--yes'], 60)
             if not ok:
                 return False, f'힘을 켠 뒤 홈으로 못 감: {last}'
