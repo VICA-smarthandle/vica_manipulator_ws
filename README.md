@@ -65,6 +65,20 @@ bash run/all.sh                  # 시연: 카메라 없이 저장된 경로로 
 | `service:=false` | NX 서비스 없이 실행 |
 | `press:=up` / `press:=none` | 시연에서 누를 버튼 / 누르지 않음 |
 
+### 부팅 자동 실행 (나노)
+
+`run/boot.sh`가 랜선(10.77.0.2) → 팔 보드 → 카메라(최대 60초)를 기다린 뒤 `all.sh camera:=true`를 켭니다. 팔이 홈으로 한 번 움직인 뒤 힘을 빼고 NX 명령을 기다립니다. **부팅할 때 팔 주변을 비워 두세요.**
+
+```bash
+# 설치(한 번)
+sudo cp ~/vica_manipulator_ws/src/vica_manipulator/run/systemd/vica-arm.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now vica-arm
+systemctl status vica-arm          # 상태
+journalctl -u vica-arm -f          # 로그
+sudo systemctl stop vica-arm       # 끄기 (손으로 all.sh·demo_hand.sh 를 돌리기 전에 — 같은 팔 포트를 쓴다)
+sudo systemctl start vica-arm      # 켜기
+sudo systemctl disable vica-arm    # 자동 실행 해제
+```
+
 ### 개별 실행
 
 | 명령 | 내용 |
@@ -87,7 +101,10 @@ bash run/all.sh                  # 시연: 카메라 없이 저장된 경로로 
 |---|---|
 | ROS 도메인 | **77** (노트북 시험은 `VICA_ARM_DOMAIN=78`) |
 | 통신 | 나노-NX 랜선(10.77.0.x)으로만 (`config/dds_wired.xml`). 해제하려면 `VICA_ARM_DDS=all` |
-| 비상정지 | 도메인 7 `/estop_state` 수신 시 정지 후 홈 |
+| 비상정지 | 도메인 7 `/estop_state` 수신 시 정지 후 홈. 신호가 안 들리면(3초 기다림) 요청 거절 |
+| 대기 | 쉬는 동안 홈(지지대 위)에서 모터 힘을 뺀다. 명령이 오면 힘을 켜고 천천히 홈 → 동작 → 홈 → 다시 뺀다. 끄려면 `VICA_IDLE_TORQUE_OFF=0` |
+
+**켜는 순서**: 랜선을 꽂은 뒤 NX·나노 프로그램을 켭니다. 랜선 없이 켠 프로그램은 와이파이로만 말해 서로 못 찾습니다(나노가 `비상정지 모름`이면 NX safety 노드를 다시 켜면 됨).
 
 서비스 (`std_srvs/srv/Trigger`):
 
@@ -107,7 +124,7 @@ ROS_DOMAIN_ID=77 ros2 service call /arm/demo std_srvs/srv/Trigger     # NX 앱 �
 
 ## 안전
 
-- **손 감시**: 카메라 0.8 m 안에 손이 보이면 어느 단계든 정지, 손을 빼면 다시 계획해 이어감. 30초 넘으면 실패
+- **손 감시**: 카메라 0.8 m 안에 손이 보이면 어느 단계든 정지, 손을 빼면 다시 계획해 이어감. 20초(`guard.wait_sec`) 넘으면 그만두고 홈
 - **경로 감시**: 버튼으로 가는 길에 물체가 들어오면 정지
 - **장애물**: `config/scene.yaml`의 AMR 차체·짐칸이 MoveIt에 자동으로 들어감. 없으면 누르기 거부
 - **전류 제한**: 모터는 전류 제한 위치 제어(모드 5)로, 막혀도 설정 이상 밀지 않음
