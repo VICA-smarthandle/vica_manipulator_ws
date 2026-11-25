@@ -64,6 +64,8 @@ JOINTS = ['joint1', 'joint2', 'joint3', 'joint4']
 ESTOP_DOMAIN = int(os.environ.get('VICA_ESTOP_DOMAIN', '7'))
 ESTOP_TOPIC = '/estop_state'   # vica_safety emergency_stop_node 가 주기적으로 내는 래치 상태(Bool, 눌림 = True)
 ESTOP_STALE_SEC = 2.0          # 이만큼 안 들리면 '모름'
+ESTOP_WAIT_SEC = 3.0           # 11-25 사용자: 요청이 왔는데 '모름'이면 바로 거절하지 않고 이만큼 신호를 기다린다
+                               # (나노를 막 켠 직후 NX 노드를 아직 못 찾았거나, NX safety 리셋 중 잠깐 끊긴 때)
 # 비상정지 홈 속도 배율 = 평소 홈(pose.py 0.1)과 같다. 10-18 실물로 절반(0.05: 빼기 1.5 s·홈 6.6 s, 전류 최대
 # 어깨 155·팔꿈치 −129)과 평소(빼기 1.1 s·홈 3.8 s, 213·−165)를 보고 사용자가 평소 속도로 정했다
 ESTOP_VEL = 0.1
@@ -209,11 +211,18 @@ class ArmService(Node):
 
     def _start(self, what, res, allow_estop=False):
         on = self.estop.on()
+        if on is None and ESTOP_REQUIRED and not allow_estop:
+            t = time.time()
+            while on is None and time.time() - t < ESTOP_WAIT_SEC:
+                time.sleep(0.05)
+                on = self.estop.on()
+            if on is not None:
+                self.get_logger().info(f'비상정지 신호를 {time.time() - t:.1f}초 기다려 들음({self.estop.text()})')
         if on is True and not allow_estop:
             res.success, res.message = False, '거절: 비상정지 중'
             return False
         if on is None and ESTOP_REQUIRED and not allow_estop:
-            res.success, res.message = False, (f'거절: 비상정지 신호를 못 들음(도메인 {ESTOP_DOMAIN} {ESTOP_TOPIC}). '
+            res.success, res.message = False, (f'거절: 비상정지 신호를 {ESTOP_WAIT_SEC:.0f}초 기다려도 못 들음(도메인 {ESTOP_DOMAIN} {ESTOP_TOPIC}). '
                                                'NX 비상정지 프로그램·랜선을 확인하세요')
             return False
         if not self.busy.acquire(blocking=False):
