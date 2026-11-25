@@ -231,25 +231,42 @@ def load_mid():
         return yaml.safe_load(f).get("mid") or {}
 
 
-def saved_path(target):
-    """누르기에 성공한 버튼 자리(시연 --fallback·--blind 가 쓴다). 저장소 밖(로그 폴더)에 둔다."""
-    return os.path.expanduser(f"~/vica_arm_logs/last_press_{target}.json")
+REAL_DOMAIN = "77"        # 나노 실물 팔(run/common.sh 기본). 가짜 팔·노트북 시험은 78·79
+
+
+def test_suffix():
+    """도메인이 실물 팔(77)이 아니면 '_test<도메인>'. 사진 폴더·성공한 버튼 자리를 실물 것과 따로 둔다 —
+    11-16 가짜 팔(79) 시험 3 회가 사진 폴더 최근 100 개 정리에 걸려 10-22 실물 기록 3 건을 지웠다."""
+    dom = os.environ.get("ROS_DOMAIN_ID", "")
+    return "" if dom == REAL_DOMAIN else f"_test{dom or 0}"
+
+
+def saved_path(target, suffix=None):
+    """누르기에 성공한 버튼 자리(시연 --fallback·--blind 가 쓴다). 저장소 밖(로그 폴더)에 둔다.
+    시험 도메인이면 last_press_<버튼>_test<도메인>.json 에 쓴다(실물 자리를 덮어쓰지 않게)."""
+    s = test_suffix() if suffix is None else suffix
+    return os.path.expanduser(f"~/vica_arm_logs/last_press_{target}{s}.json")
 
 
 def load_saved(target):
-    try:
-        with open(saved_path(target)) as f:
-            d = json.load(f)
-        return d if len(d.get("button") or []) == 3 else None
-    except (OSError, ValueError):
-        return None
+    """저장한 버튼 자리. 시험 도메인은 시험용 파일이 없으면 실물 자리를 읽는다(읽기만 — 가짜 팔 --blind 시험용)."""
+    for p in dict.fromkeys((saved_path(target), saved_path(target, ""))):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+            if len(d.get("button") or []) == 3:
+                return d
+        except (OSError, ValueError):
+            pass
+    return None
 
 
 def load_photo_dir():
-    """누르기 사진을 남길 폴더(config/press.yaml photos). 비어 있으면 None = 안 남김."""
+    """누르기 사진을 남길 폴더(config/press.yaml photos). 비어 있으면 None = 안 남김.
+    시험 도메인이면 그 옆 <폴더>_test<도메인>(예: ~/vica_arm_logs/press_test79) — 최근 100 개 정리도 그 안에서만."""
     with open(CONFIG) as f:
         d = yaml.safe_load(f).get("photos")
-    return os.path.expanduser(d) if d else None
+    return os.path.expanduser(d).rstrip("/") + test_suffix() if d else None
 
 
 def look_pose(pose, cam_h, yaw_deg=0.0):
@@ -1339,6 +1356,9 @@ def main():
         args.push_yaw = math.radians(float(prof["push_yaw_deg"]))
     if args.seek is None:
         args.seek = float(prof.get("seek", 0.0))
+    if test_suffix():
+        print(f"[시험 도메인 {os.environ.get('ROS_DOMAIN_ID') or '0'}] 사진은 {load_photo_dir()}, 성공한 버튼 자리는 "
+              f"{saved_path(args.target)} 에 — 실물(도메인 {REAL_DOMAIN}) 기록과 따로")
     print("[설정] 찌르는 방향: " + ("밑동에서 버튼 쪽(방사 방향)" if args.push_yaw is None else
                                f"벽 법선 {math.degrees(args.push_yaw):+.0f}°(world) — 손끝이 벽에 수직으로 곧게 들어감")
           + (f", 안 닿으면 {args.seek * 100:.1f} cm 더 밀며 찾음" if args.seek > 0 else ""))
