@@ -22,6 +22,12 @@ press.py <demo.service_target> --observe --yes --blind --no-path-guard. 관찰 �
 닿음이 없으면 '닿음 감지 없음', 호출 버튼이 닿았는데 불이 끝내 안 켜지면 '닿았지만 불이 안 켜짐' 실패로 답한다. 층 버튼은 두 번 누르면 취소되니
 여기서 다시 누르지 않는다(NX 조율 #5 — 다시 누를지는 NX 가 엘베 출발을 보고 정한다).
 
+NX 앱이 기대는 약속(11-25 NX 공유) — 바꾸면 NX 중계(arm_relay_node.py)·앱 버튼이 깨진다:
+  · 서비스 이름·형식: 도메인 77 /arm/demo·/arm/home·/arm/status (std_srvs/Trigger)
+  · NX 중계 대기: /arm/demo 180 s, /arm/home 60 s, /arm/status 5 s. 넘으면 앱에 '시간 초과'
+  · message 는 앱 화면에 그대로 나간다. '홈 복귀 실패' 글자가 있어야 앱에 [홈으로](→ /arm/home)가 뜬다
+  · 비상정지는 도메인 7 /estop_state 를 랜선으로 듣는다(NX 20 Hz)
+
 한 번에 하나만 받는다(돌고 있으면 거절). 동작은 손으로 시험한 press.py 를 --observe --yes 로 그대로 부른다
 (관찰 자세 → 찾기 → 누르기 → 홈). 비상정지 홈·/arm/home 은 pose.py.
 응답은 성공 여부와 한 줄 설명이다. 버튼을 못 찾거나 중간에 실패하면 손끝을 6 cm 뺀 뒤 홈으로 가고,

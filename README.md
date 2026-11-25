@@ -104,6 +104,8 @@ sudo systemctl disable vica-arm    # 자동 실행 해제
 | 비상정지 | 도메인 7 `/estop_state` 수신 시 정지 후 홈. 신호가 안 들리면(3초 기다림) 요청 거절 |
 | 대기 | 쉬는 동안 홈(지지대 위)에서 모터 힘을 뺀다. 명령이 오면 힘을 켜고 천천히 홈 → 동작 → 홈 → 다시 뺀다. 끄려면 `VICA_IDLE_TORQUE_OFF=0` |
 
+**NX 앱과의 약속** (NX 중계 `arm_relay_node.py` 가 기댐 — 바꾸지 말 것): 서비스 이름·형식(`/arm/demo`·`/arm/home`·`/arm/status`, Trigger), 응답 시간(demo 180 s·home 60 s·status 5 s 안), message 는 앱에 그대로 표시, `홈 복귀 실패` 문구가 있어야 앱에 [홈으로] 버튼이 뜸.
+
 **켜는 순서**: 랜선을 꽂은 뒤 NX·나노 프로그램을 켭니다. 랜선 없이 켠 프로그램은 와이파이로만 말해 서로 못 찾습니다(나노가 `비상정지 모름`이면 NX safety 노드를 다시 켜면 됨).
 
 서비스 (`std_srvs/srv/Trigger`):
