@@ -27,6 +27,7 @@ from launch.substitutions import FindExecutable
 from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -69,12 +70,15 @@ def generate_launch_description():
         'port_name:=',
         port_name,
     ])
+    # 11-25: 문자열로 못 박는다. 안 하면 launch 가 URDF 를 YAML 로 한 번 읽어, xacro 주석에 '뒤: ' 같은 콜론+빈칸이 있으면
+    # 'Unable to parse the value of parameter robot_description as yaml' 로 팔이 안 켜진다(부팅 자동 실행에서 발견)
+    robot_description = ParameterValue(urdf_file, value_type=str)
 
     control_node = Node(
         package='controller_manager',
         executable='ros2_control_node',
         parameters=[
-            {'robot_description': urdf_file},
+            {'robot_description': robot_description},
             PathJoinSubstitution([pkg, 'config', 'controllers.yaml']),
         ],
         output='both',
@@ -85,13 +89,13 @@ def generate_launch_description():
         executable='spawner',
         arguments=['arm_controller', 'joint_state_broadcaster'],
         output='both',
-        parameters=[{'robot_description': urdf_file}],
+        parameters=[{'robot_description': robot_description}],
     )
 
     robot_state_publisher_node = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
-        parameters=[{'robot_description': urdf_file}],
+        parameters=[{'robot_description': robot_description}],
         output='both',
     )
 

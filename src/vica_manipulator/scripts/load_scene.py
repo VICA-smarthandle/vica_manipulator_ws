@@ -22,6 +22,7 @@ from shape_msgs.msg import SolidPrimitive
 import yaml
 
 WAIT_SEC = 60.0
+TRIES = 9                # 장애물 넣기 다시 보내기 최대 번수(번마다 10 초까지 기다림)
 
 
 def to_world(p, mount):
@@ -79,9 +80,15 @@ def main():
         sys.exit(f'{WAIT_SEC:.0f}초 기다려도 move_group 이 없습니다')
     scene = PlanningScene(is_diff=True)
     scene.world.collision_objects = objs
-    fut = cli.call_async(ApplyPlanningScene.Request(scene=scene))
-    rclpy.spin_until_future_complete(n, fut, timeout_sec=10.0)
-    if fut.result() is None or not fut.result().success:
+    # 11-25 부팅 자동 실행: move_group 이 서비스는 열었지만 아직 로딩 중이면(카메라·YOLO·손 인식이 같이 뜰 때) 10 초 안에
+    # 답이 없어 '장애물을 넣지 못했습니다' → 팔 서비스가 안 떴다. 답이 없거나 실패면 다시 보낸다(최대 TRIES 번)
+    for k in range(1, TRIES + 1):
+        fut = cli.call_async(ApplyPlanningScene.Request(scene=scene))
+        rclpy.spin_until_future_complete(n, fut, timeout_sec=10.0)
+        if fut.result() is not None and fut.result().success:
+            break
+        print(f'장애물 넣기 {k}/{TRIES}번째 답 없음·실패 — move_group 이 아직 준비 중일 수 있어 다시 보냅니다', flush=True)
+    else:
         sys.exit('장애물을 넣지 못했습니다')
     for o in objs:
         p = o.primitive_poses[0].position
